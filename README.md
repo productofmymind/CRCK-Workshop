@@ -2,7 +2,7 @@
 
 **CRCK Workshop** is a Blender add-on for GTA V vehicle modding. It sits **on top of [Sollumz](https://github.com/Sollumz/Sollumz)** and adds what a vehicle workflow is missing: a tree view of the vehicle's parts, one-click checks with fixes, whole-vehicle LOD generation, paint and material tools, and a smaller-file export. It replaces nothing Sollumz does.
 
-**Version 0.17.1** · Blender 4.0+ (tested on 5.2.3) · Sollumz 2.8+ (tested with 2.9) · Windows, macOS and Linux · GPL-3.0-or-later
+**Version 0.17.2** · Blender 4.0+ (tested on 5.2.3) · Sollumz 2.8+ (tested with 2.9) · Windows, macOS and Linux · GPL-3.0-or-later
 
 ## What it does, in short
 

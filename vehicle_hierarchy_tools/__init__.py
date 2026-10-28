@@ -10,7 +10,7 @@ bl_info = {
     "author": "George",
     "description": "Vehicle tools for Sollumz: part tree, fixes, LODs, export",
     "blender": (4, 0, 0),
-    "version": (0, 17, 1),
+    "version": (0, 17, 2),
     "category": "Import-Export",
 }
 
