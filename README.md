@@ -82,7 +82,7 @@ Import/export, shader conversion, collision creation, mass, light IDs, cloth and
 
 - Generated LODs are judged by surface distance, normals and UVs against the start mesh, not rendered or run in game. Set LOD distances yourself.
 - The size estimate is not checked against the resource header.
-- Blender 4.0/4.1 and Sollumz 2.8 are supported from their source and by tests that stand in for their differences, but have not been run in those versions yet. Tested on Blender 5.2.3 with Sollumz 2.9.
+- The test suite passes on Blender 4.0.2 and 4.1.1 with Sollumz 2.8.3, and on 4.2.23, 4.5.15, 5.0.1 and 5.2.3 with Sollumz 2.9.0. Other versions in between are untested.
 - At the lowest levels (L3, L4) a part with a lot of fine detail in a small area (a spoiler lip on a boot lid) can lose that detail, because every part gets the same share of its triangles. Look over L3 and L4 before shipping.
 - Performance on very large vehicles is untested.
 

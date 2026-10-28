@@ -59,7 +59,7 @@ def slot_counts(models):
 def corner_normals(mesh, dtype=np.float32):
     """Flat array of per-corner normals. Mesh.corner_normals is Blender 4.1+; 4.0 computes split normals into the loops."""
     out = np.empty(len(mesh.loops) * 3, dtype)
-    if hasattr(mesh, "corner_normals"):
+    if bpy.app.version >= (4, 1, 0):  # 4.0 has the attribute too, but empty
         mesh.corner_normals.foreach_get("vector", out)
     else:
         mesh.calc_normals_split()

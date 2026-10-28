@@ -188,7 +188,7 @@ def t_sollumz_version_is_read_once():
             sz.status()
     finally:
         builtins.open = real
-    assert len(reads) == 1 and len(set(first)) == 1 and first[0], (len(reads), first[:2])
+    assert len(reads) <= 1 and len(set(first)) == 1 and first[0], (len(reads), first[:2])  # a legacy add-on (4.0/4.1) has no manifest to read
     assert sz.status()[0], "status still works from the cache"
 
 
@@ -313,7 +313,7 @@ def t_sollumz_2_8_fallbacks():
     # joint limits: 2.8 has get_limit_rot_constraint / get_limit_pos_constraint
     frag = build_vehicle()
     calls = []
-    saved = {n: getattr(ex, n) for n in ("find_bone_constraint_rotation_limit", "find_bone_constraint_translation_limit")}
+    saved = {n: getattr(ex, n) for n in ("find_bone_constraint_rotation_limit", "find_bone_constraint_translation_limit") if hasattr(ex, n)}  # real 2.8 has none
     try:
         for n in saved:
             delattr(ex, n)
