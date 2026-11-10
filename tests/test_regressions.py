@@ -468,6 +468,49 @@ def t_transfer_materials_adds_slots_and_moves_no_face():
     assert bpy.ops.vht.mat_transfer(mode="ALL") == {"FINISHED"} and len(dst.data.materials) == n, "nothing added twice"
 
 
+@test
+def t_rear_rotor_aligns_local_x_and_origin_moves_to_spin_centre():
+    import math
+    from mathutils import Matrix, Vector
+    from vehicle_hierarchy_tools import axes
+    frag = build_vehicle()
+    bh, sp = sollumz("tools.blenderhelper"), sollumz("sollumz_properties")
+    head = Vector((0.5, -3.0, 1.0))
+    bpy.ops.object.mode_set(mode="EDIT")
+    eb = frag.data.edit_bones.new("rotor_rear")
+    eb.head, eb.tail = head, head + Vector((0, 0, 0.1))
+    eb.parent = frag.data.edit_bones["chassis"]
+    eb.matrix = Matrix.Translation(head)  # identity rotation, as vanilla rear rotors have
+    bpy.ops.object.mode_set(mode="OBJECT")
+    # a disc whose normal is 3 degrees off the bone's X and whose centre is 30 mm off its origin
+    tilt = Matrix.Rotation(math.radians(3.0), 3, "Z")
+    centre = Vector((0.0, 0.03, 0.0))
+    verts = [centre + tilt @ Vector((0.0, r * math.cos(a), r * math.sin(a)))
+             for r, n in ((1.0, 24), (0.2, 12)) for a in (2 * math.pi * i / n for i in range(n))]
+    me = bpy.data.meshes.new("rotor_m")
+    me.from_pydata(verts, [], [])
+    o = bh.create_blender_object(sp.SollumType.DRAWABLE_MODEL, "rotor_m", me)
+    o.sz_lods.get_lod(sp.LODLevel.HIGH).mesh = me
+    o.parent = bpy.data.objects["testcar_drawable"]
+    o.location = head
+    bh.add_child_of_bone_constraint(o, frag, "rotor_rear")
+    o.location = (0.0, 0.0, 0.0)
+    bpy.context.view_layer.update()
+
+    assert abs(axes.spin_wobble(frag, "rotor_rear") - 3.0) < 0.05, "the rear rotor's wobble is measured from local X"
+    assert abs(axes.spin_centre(frag, "rotor_rear")[1] - 0.03) < 0.002
+    found = codes(frag)
+    assert ("HV090_ROTOR_AXIS", "rotor_rear") in found and ("HV091_ROTOR_ORIGIN", "rotor_rear") in found
+    for mode in ("ALIGN", "SPIN"):
+        lines, ok = axes.set_axes(bpy.context, frag, "rotor_rear", mode)
+        assert ok, lines
+    assert axes.spin_wobble(frag, "rotor_rear") < 0.05 and axes.spin_centre(frag, "rotor_rear")[1] < 0.001
+    x = frag.data.bones["rotor_rear"].matrix_local.to_3x3().col[0]
+    assert x.angle(Vector((1, 0, 0))) < math.radians(4), "local X stays the spin axis: the rotor is not turned sideways"
+    found = codes(frag)
+    assert ("HV090_ROTOR_AXIS", "rotor_rear") not in found and ("HV091_ROTOR_ORIGIN", "rotor_rear") not in found
+
+
 fails = [r for r in results if not r[1]]
 print(f"\n{len(results) - len(fails)}/{len(results)} passed")
 sys.exit(1 if fails else 0)

@@ -168,10 +168,17 @@ def validate_rules(v, profile=None):
             wobble = axes.spin_wobble(v.frag, b.name, v.models)
             if wobble is not None and wobble > 1.0:
                 out.append(Finding(WARNING, "HV090_ROTOR_AXIS",
-                                   f"'{b.name}' spins on its local Z, which is {wobble:.1f} degrees off the normal of its blades' "
+                                   f"'{b.name}' spins on its local {'XYZ'[axes.spin_axis(b.name)]}, which is {wobble:.1f} degrees off the normal of its blades' "
                                    "disc, so the rotor wobbles instead of spinning flat. (Vanilla rotors are tilted on purpose but "
                                    "within 0.1 degrees of their disc.) Align the spin axis to the geometry; nothing moves.",
                                    b.name, "bone", {"op": "set_axes", "bone": b.name, "mode": "ALIGN"}))
+            _, off = axes.spin_centre(v.frag, b.name, v.models)
+            if off is not None and off > 0.015:  # vanilla main rotors sit up to ~10 mm off, rear ones under 1 mm
+                out.append(Finding(WARNING, "HV091_ROTOR_ORIGIN",
+                                   f"'{b.name}' has its origin {off * 1000:.0f} mm off the centre of its blades' circle, so the "
+                                   "hub orbits in a small circle instead of spinning in place. Move the origin onto the spin "
+                                   "centre; nothing moves.",
+                                   b.name, "bone", {"op": "set_axes", "bone": b.name, "mode": "SPIN"}))
 
     for b in bones:
         if b.parent is not None and index[b.parent.name] >= index[b.name]:

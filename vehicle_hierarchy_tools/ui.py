@@ -445,6 +445,7 @@ class VHT_PT_axes(Sub):
         col.operator("vht.tree_axes", text="Reset to Parent", icon="PARTICLE_PATH").mode = "PARENT"
         col.operator("vht.tree_axes", text="Reset to World", icon="WORLD").mode = "WORLD"
         col.operator("vht.tree_axes", text="Align Spin Axis to Geometry", icon="ORIENTATION_NORMAL").mode = "ALIGN"
+        col.operator("vht.tree_axes", text="Origin to Spin Centre", icon="PIVOT_MEDIAN").mode = "SPIN"
         col.operator("vht.tree_axes", text="Origin to 3D Cursor", icon="CURSOR").mode = "CURSOR"
         col.operator("vht.tree_axes", text="Copy From Grabbed", icon="COPYDOWN").mode = "COPY"
 

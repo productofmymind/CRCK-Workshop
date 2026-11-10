@@ -771,7 +771,8 @@ class VHT_OT_tree_axes(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
     mode: EnumProperty(items=[("CENTER", "Center to Object", ""), ("PARENT", "Reset to Parent", ""),
                               ("WORLD", "Reset to World", ""), ("COPY", "Copy From Grabbed", ""),
-                              ("CURSOR", "Origin to 3D Cursor", ""), ("ALIGN", "Align Spin Axis to Geometry", "")])
+                              ("CURSOR", "Origin to 3D Cursor", ""), ("ALIGN", "Align Spin Axis to Geometry", ""),
+                              ("SPIN", "Origin to Spin Centre", "")])
     def execute(self, context):
         from . import axes
         v = get_vehicle(self, context)

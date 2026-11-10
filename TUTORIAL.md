@@ -67,7 +67,7 @@ Blender can't drag list rows, so it takes two clicks:
 
 - **Auto Arrange** (top of the tab) previews the moves that put parts where vanilla vehicles have them: bones under their usual parents, models and collisions on the bone they are named after. Review the preview, then Apply Changes.
 - **Rename Part** (Parts and Bone Order) renames the bone, its models, collisions, mesh data and vertex groups together.
-- **Local Axes** changes a bone's axes without moving anything you can see. **Align Spin Axis to Geometry** fixes a rotor that wobbles.
+- **Local Axes** changes a bone's axes without moving anything you can see. **Align Spin Axis to Geometry** fixes a rotor that wobbles; **Origin to Spin Centre** fixes a hub that circles as it spins.
 - **Bone order:** Up and Down move a bone among its siblings. The bone index follows.
 
 ## 5. Generate LODs

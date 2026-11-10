@@ -111,8 +111,10 @@ CATALOG = {
                         "Renumber the sirens or add the missing one.", None),
     "HV080_SIREN_GLASS_ORPHAN": ("siren_glass without its siren", "Each siren_glassN belongs with a sirenN.",
                                  "Add the matching siren bone or remove the glass bone.", None),
-    "HV090_ROTOR_AXIS": ("Rotor spin axis is not square to its blades", "The rotor spins on its local Z, so the blades wobble instead of spinning flat.",
+    "HV090_ROTOR_AXIS": ("Rotor spin axis is not square to its blades", "The rotor spins on its local Z (local X on a rear rotor), so the blades wobble instead of spinning flat.",
                          "Hierarchy > Local Axes > Align Spin Axis to Geometry.", "Aligns the axis to the blade disc; nothing moves."),
+    "HV091_ROTOR_ORIGIN": ("Rotor origin is off its spin centre", "The rotor spins around its origin, so the hub orbits in a small circle instead of spinning in place.",
+                           "Hierarchy > Local Axes > Origin to Spin Centre.", "Slides the origin onto the centre of the blade tips' circle; nothing moves."),
     # --- export checks
     "FEW_LODS": ("The vehicle has fewer than 4 LODs", "Vehicles normally carry four LOD meshes; with fewer, the lower detail levels are missing.",
                  "Generate LODs fills the missing slots from the highest one.", None),

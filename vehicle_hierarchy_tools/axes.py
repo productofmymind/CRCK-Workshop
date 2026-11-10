@@ -9,7 +9,8 @@ The axes change and the geometry stays where it is:
   WORLD   world orientation (X right, Y forward, Z up), origin unchanged
   COPY    take the origin and orientation of another bone
   CURSOR  move the origin to the 3D cursor, keep the orientation 
-  ALIGN   turn local Z onto the normal of the part's own blade disc, origin unchanged (the fix for a wobbling rotor)
+  ALIGN   turn the spin axis (local Z, or local X on a rear rotor) onto the normal of the part's own blade disc, origin unchanged (the fix for a wobbling rotor)
+  SPIN    slide the origin within the disc plane onto the centre of the blade tips' circle (the fix for a hub that orbits)
 
 What keeps its place: children bones (their rest pose is absolute), skinned geometry (at rest it does not depend on the rest matrix)
 and rigid geometry and collisions bound by constraint (their basis is re-solved). What does not adapt: rotation or location limits
@@ -22,7 +23,7 @@ from mathutils import Matrix, Vector
 
 from . import analysis, boneorder, sollumz_bridge as sz
 
-MODES = ("CENTER", "PARENT", "WORLD", "COPY", "CURSOR", "ALIGN")
+MODES = ("CENTER", "PARENT", "WORLD", "COPY", "CURSOR", "ALIGN", "SPIN")
 TOLERANCE = 1e-4
 
 
@@ -49,15 +50,19 @@ def target_matrix(frag, bone, mode, source=None, objs=(), rotation=True, positio
             pos = bone.parent.matrix_local.to_translation() if bone.parent else world_origin
     elif mode == "CURSOR":
         pos = frag.matrix_world.inverted() @ bpy.context.scene.cursor.location
+    elif mode == "SPIN":
+        if objs is None:  # for SPIN the caller passes the world-space spin centre here
+            raise ValueError("no round rim (blade tips or disc) to centre on")
+        pos = frag.matrix_world.inverted() @ objs
     elif mode == "ALIGN":
         normal = objs  # for ALIGN the caller passes the world-space disc normal here
         if normal is None:
             raise ValueError("no blade geometry to align to")
         n = frag.matrix_world.to_3x3().inverted() @ normal
-        z = rot.col[2].copy()
+        z = rot.col[spin_axis(bone.name)].copy()
         if z.dot(n) < 0:
             n = -n
-        rot = z.rotation_difference(n.normalized()).to_matrix() @ rot  # smallest turn that puts local Z on the disc normal
+        rot = z.rotation_difference(n.normalized()).to_matrix() @ rot  # smallest turn that puts the spin axis on the disc normal
     elif mode == "COPY":
         if rotation:
             rot = _rot3(source.matrix_local)
@@ -105,6 +110,8 @@ def set_axes(context, frag, bone_name, mode, source_name=None, extra_objs=(), ro
         geo = [o for o in v.models if o in own] or list(extra_objs) or own
         if mode == "ALIGN":
             geo, _ = disc_normal(frag, bone_name, v.models)
+        if mode == "SPIN":
+            geo, _ = spin_centre(frag, bone_name, v.models)
         new = target_matrix(frag, bone, mode, source, geo, rotation, position)
     except ValueError as e:
         return [f"{bone_name}: {e}" + (" (select objects to centre on)." if mode == "CENTER" else ".")], False
@@ -143,40 +150,92 @@ def set_axes(context, frag, bone_name, mode, source_name=None, extra_objs=(), ro
     return lines, not (changed or moved)
 
 
+def _bone_points(frag, bone_name, models=None):
+    """World-space vertices that follow the bone: weighted > 0.5 to its vertex group, or all vertices of a rigid model bound to
+    it. A bone with no geometry of its own (rotor_main, rotor_rear) takes that of its same-named children (_slow, _fast)."""
+    models = models if models is not None else analysis.load(frag).models
+
+    def of(name):
+        pts = []
+        for o in models:
+            if o.type != "MESH":
+                continue
+            vg = o.vertex_groups.get(name)
+            if vg is not None:
+                idx = vg.index
+                sel = [v.co for v in o.data.vertices if any(g.group == idx and g.weight > 0.5 for g in v.groups)]
+            elif sz.child_of_bone(o) is not None and sz.child_of_bone(o).name == name:
+                sel = [v.co for v in o.data.vertices]
+            else:
+                continue
+            pts += [tuple(o.matrix_world @ c) for c in sel]
+        return pts
+
+    pts = of(bone_name)
+    bone = frag.data.bones.get(bone_name)
+    if len(pts) < 10 and bone is not None:
+        pts = [p for c in bone.children if c.name.startswith(bone_name) for p in of(c.name)]
+    return pts
+
+
+def spin_centre(frag, bone_name, models=None):
+    """(world-space point the bone's origin should sit on, metres it is off by): the origin slid within the disc plane onto the
+    centre of the circle the outermost vertices (blade tips, or the blur disc's rim) lie on. Position along the spin axis is
+    kept. An origin off that centre makes the hub orbit as the rotor spins. Returns (None, None) without a usable rim.
+    chisle: rim fit only; the hub is assumed concentric with the blades. Fit the hub itself if a model breaks that."""
+    import numpy as np
+    bone = frag.data.bones.get(bone_name)
+    pts = _bone_points(frag, bone_name, models)
+    if bone is None or len(pts) < 10:
+        return None, None
+    m = frag.matrix_world @ bone.matrix_local
+    o = np.array(m.to_translation())
+    r3 = m.to_3x3()
+    u, v = (np.array(r3.col[i].normalized()) for i in range(3) if i != spin_axis(bone_name))
+    d = np.array(pts) - o
+    xy = np.stack([d @ u, d @ v], axis=1)
+    r = np.linalg.norm(xy - xy.mean(axis=0), axis=1)
+    rim = xy[r > 0.97 * r.max()]
+    if len(rim) < 6:
+        return None, None
+    # least-squares circle: x^2 + y^2 = 2*cx*x + 2*cy*y + k
+    sol, *_ = np.linalg.lstsq(np.column_stack([rim, np.ones(len(rim))]), (rim ** 2).sum(axis=1), rcond=None)
+    c = sol[:2] / 2
+    quadrants = {(x > 0, y > 0) for x, y in rim - c}
+    if len(quadrants) < 3:  # tips on one line (two blades): the centre across that line is a guess
+        return None, None
+    return Vector(o + c[0] * u + c[1] * v), float(np.hypot(*c))
+
+
 def disc_normal(frag, bone_name, models=None):
     """(world-space unit normal of the plane the part's geometry lies in, vertex count). The normal is the smallest-variance
     direction of the vertices that follow the bone: weighted > 0.5 to its vertex group, or all vertices of a rigid model bound to it.
     Returns (None, count) when there is too little geometry."""
     import numpy as np
-    arm = frag.data
-    models = models if models is not None else analysis.load(frag).models
-    pts = []
-    for o in models:
-        if o.type != "MESH":
-            continue
-        vg = o.vertex_groups.get(bone_name)
-        if vg is not None:
-            idx = vg.index
-            sel = [v.co for v in o.data.vertices if any(g.group == idx and g.weight > 0.5 for g in v.groups)]
-        elif sz.child_of_bone(o) is not None and sz.child_of_bone(o).name == bone_name:
-            sel = [v.co for v in o.data.vertices]
-        else:
-            continue
-        pts += [tuple(o.matrix_world @ c) for c in sel]
+    pts = _bone_points(frag, bone_name, models)
     if len(pts) < 10:
         return None, len(pts)
     a = np.array(pts)
     a -= a.mean(axis=0)
-    _, vec = np.linalg.eigh(a.T @ a)
+    w, vec = np.linalg.eigh(a.T @ a)
+    if w[1] < 4 * w[0]:  # no flat disc (e.g. thin blades ~ a line): the smallest axis is ambiguous and may lie in the disc
+        return None, len(pts)
     return Vector(vec[:, 0]).normalized(), len(pts)
 
 
+def spin_axis(bone_name):
+    """Index of the local axis the game spins a rotor bone on: X for the rear rotor, Z for the main one (measured on vanilla
+    helicopters: rotor_rear keeps an identity rotation and its disc normal is local X)."""
+    return 0 if bone_name.startswith("rotor_rear") else 2
+
+
 def spin_wobble(frag, bone_name, models=None):
-    """Degrees between the bone's local Z (the axis a rotor spins on) and the normal of its blade disc, or None without geometry.
-    A rotor turns about local Z, so any angle here makes the blades wobble. (Vanilla rotors are tilted on purpose but keep this at ~0.)"""
+    """Degrees between the bone's spin axis (see spin_axis) and the normal of its blade disc, or None without geometry.
+    Any angle here makes the blades wobble. (Vanilla rotors are tilted on purpose but keep this at ~0.)"""
     bone = frag.data.bones.get(bone_name)
     n, _ = disc_normal(frag, bone_name, models)
     if bone is None or n is None:
         return None
-    z = (frag.matrix_world.to_3x3() @ bone.matrix_local.to_3x3().col[2]).normalized()
-    return math.degrees(min(z.angle(n, 0.0), z.angle(-n, 0.0)))
+    z = (frag.matrix_world.to_3x3() @ bone.matrix_local.to_3x3().col[spin_axis(bone_name)]).normalized()
+    deg = math.degrees(min(z.angle(n, 0.0), z.angle(-n, 0.0)))
+    return deg if deg < 30 else None  # a real wobble is a few degrees; a big angle means the disc estimate is wrong, not the axis
