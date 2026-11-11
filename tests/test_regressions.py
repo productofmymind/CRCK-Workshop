@@ -511,6 +511,116 @@ def t_rear_rotor_aligns_local_x_and_origin_moves_to_spin_centre():
     assert ("HV090_ROTOR_AXIS", "rotor_rear") not in found and ("HV091_ROTOR_ORIGIN", "rotor_rear") not in found
 
 
+@test
+def t_glass_collision_faces_outwards_on_a_mirrored_model_and_takes_only_its_bone():
+    from mathutils import Vector
+    from vehicle_hierarchy_tools import fixes, sollumz_bridge as sz
+
+    def outward(obj):  # share of triangles whose world-space winding faces away from the object's centre
+        pts = [obj.matrix_world @ x.co for x in obj.data.vertices]
+        mid = sum(pts, Vector()) / len(pts)
+        good = 0
+        for p in obj.data.polygons:
+            a, b, c = (pts[i] for i in p.vertices[:3])
+            good += (b - a).cross(c - a).dot((a + b + c) / 3 - mid) > 0
+        return good / len(obj.data.polygons)
+
+    for mirrored in (False, True):
+        frag = build_vehicle()
+        model = bpy.data.objects["window_m"]
+        if mirrored:
+            model.scale = (-1.0, 1.0, 1.0)
+        bpy.context.view_layer.update()
+        assert (model.matrix_world.determinant() < 0) == mirrored
+        v = analysis.load(frag)
+        fixes.make_glass_collision(v, "window_lf", "window_m")
+        bpy.context.view_layer.update()
+        col = bpy.data.objects["window_lf.col"]
+        assert col.matrix_world.determinant() > 0, "a mirrored bound is exported inside out"
+        assert outward(col) == 1.0, f"mirrored={mirrored}: {outward(col)} of the triangles face outwards"
+        want = sorted(tuple(round(c, 4) for c in model.matrix_world @ x.co) for x in model.data.vertices)
+        got = sorted(tuple(round(c, 4) for c in col.matrix_world @ x.co) for x in col.data.vertices)
+        assert got == want, "the collision sits on the pane"
+        assert sz.child_of_bone(col).name == "window_lf" and col.parent == v.composite
+
+    # one mesh skinned to two bones: each window gets its own glass only
+    build_vehicle()
+    me = cube("two_windows")
+    me.materials.append(bpy.data.materials["mat2"])
+    far = cube("far")
+    import bmesh
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bm.from_mesh(far)
+    for x in bm.verts[8:]:
+        x.co.x += 2.0
+    bm.to_mesh(me)
+    bm.free()
+    bh, sp = sollumz("tools.blenderhelper"), sollumz("sollumz_properties")
+    o = bh.create_blender_object(sp.SollumType.DRAWABLE_MODEL, "two_windows", me)
+    o.sz_lods.get_lod(sp.LODLevel.HIGH).mesh = me
+    o.vertex_groups.new(name="window_lf").add(list(range(8)), 1.0, "REPLACE")
+    o.vertex_groups.new(name="bonnet").add(list(range(8, 16)), 1.0, "REPLACE")
+    assert len(fixes.glass_pane(o)[0]) == 16
+    verts, faces = fixes.glass_pane(o, "window_lf")
+    assert len(verts) == 8 and len(faces) == 12 and all(x.x < 1.0 for x in verts)
+
+
+@test
+def t_fill_textures_names_shared_textures_and_embeds_only_generated_ones():
+    from vehicle_hierarchy_tools import sollumz_bridge as sz, textures
+    build_vehicle()
+    mat = sz.create_shader_material("vehicle_vehglass.sps")
+    nodes = [n for n in mat.node_tree.nodes if n.type == "TEX_IMAGE"]
+    for n in nodes:
+        n.texture_properties.embedded = True  # as a material copied from an embedded one has it
+    done = dict(textures.apply_defaults(mat))
+    assert done.get("DiffuseSampler") and done.get("SpecSampler") == "vehicle_generic_smallspecmap", done
+    for n in nodes:
+        if n.name in done:
+            assert n.sollumz_texture_name == done[n.name]
+            assert n.texture_properties.embedded == (done[n.name] in textures.GENERATED), n.name
+    assert textures.apply_defaults(mat) == [], "filled samplers are left alone"
+
+
+@test
+def t_lock_material_order_makes_indices_unique_and_keeps_the_order():
+    from vehicle_hierarchy_tools import fixes
+    frag = build_vehicle()
+    for m in bpy.data.materials:
+        if m.name.startswith("mat"):
+            m.shader_properties.index = 0
+    v = analysis.load(frag)
+    before = [m.name for m in analysis.export_order(v)[0]]
+    assert "MAT_INDEX_TIES" in [c for c, _ in codes(frag)]
+    assert fixes.describe(v, {"op": "lock_material_order"})[0].endswith("indices made unique")
+    fixes.apply(bpy.context, v, [{"op": "lock_material_order"}])
+    after = analysis.export_order(analysis.load(frag))[0]
+    assert [m.name for m in after] == before
+    assert [m.shader_properties.index for m in after] == list(range(len(after)))
+    assert "MAT_INDEX_TIES" not in [c for c, _ in codes(frag)]
+
+
+@test
+def t_empty_material_slot_is_reported_and_does_not_stop_the_checks():
+    from vehicle_hierarchy_tools import fixes
+    frag = build_vehicle()
+    kept = bpy.data.objects["door_m"].data.materials[0]
+    bpy.data.objects["body_m"].data.materials[0] = None  # what deleting a material in Blender leaves behind
+    found = codes(frag)  # Sollumz's own material and model walks raise on the empty slot
+    assert ("EMPTY_MATERIAL_SLOT", "body_m") in found, found
+    v = analysis.load(frag)
+    assert kept in analysis.export_order(v)[0] and None not in analysis.export_order(v)[0]
+    assert analysis.order_report(v)["models"], "the model order is still reported"
+    # merging into a material that no longer exists must not empty the slots
+    line = fixes.merge_materials(v, "no_such_material", [kept.name])
+    assert line.startswith("Nothing merged") and bpy.data.objects["door_m"].data.materials[0] is kept
+    # a model with no material at all: Sollumz drops its geometry with only a log warning
+    bpy.data.objects["boot_m"].data.materials.clear()
+    found = codes(frag)
+    assert ("MODEL_NO_MATERIAL", "boot_m") in found and ("MODEL_NO_MATERIAL", "door_m") not in found, found
+
+
 fails = [r for r in results if not r[1]]
 print(f"\n{len(results) - len(fails)}/{len(results)} passed")
 sys.exit(1 if fails else 0)

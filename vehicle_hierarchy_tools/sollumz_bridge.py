@@ -109,14 +109,36 @@ def export_materials(frag, hi=False):
     """
     helper = _mod("sollumz_helper")
     mode = helper.GetSollumzMaterialsMode.HI if hi else helper.GetSollumzMaterialsMode.BASE
-    return helper.get_sollumz_materials(frag, mode)
+    try:
+        return helper.get_sollumz_materials(frag, mode)
+    except AttributeError:
+        # An empty material slot: Sollumz reads `sollum_type` of None and fails (so does its export; the checks report the slot).
+        # The same walk, skipping empty slots, so everything else keeps working.
+        seen = []
+        for child in frag.children_recursive:
+            if sollum_type(child) != DRAWABLE_MODEL:
+                continue
+            for lod, mesh in lod_meshes(child):
+                if (lod == "very_high") == hi:
+                    seen.extend(m for m in mesh.materials if is_shader_material(m) and m not in seen)
+        return sorted(seen, key=lambda m: m.shader_properties.index)
 
 
 def export_model_objs(drawable, frag):
     """Drawable Models in the order Sollumz's exporter will process them (ydr.ydrexport.get_model_objs, then
     sort_skinned_models_by_bone). Before Sollumz merges skinned parts and splits by vertex count."""
     ex = _mod("ydr.ydrexport")
-    return ex.sort_skinned_models_by_bone(ex.get_model_objs(drawable), frag.data.bones)
+    try:
+        models = ex.get_model_objs(drawable)
+    except AttributeError:  # an empty material slot stops Sollumz's cloth test: the same list, with that test failing safe
+        def cloth(o):
+            try:
+                return ex.is_cloth_mesh_object(o)
+            except AttributeError:
+                return False
+        models = [o for o in drawable.children
+                  if sollum_type(o) == DRAWABLE_MODEL and not o.sollumz_is_physics_child_mesh and not cloth(o)]
+    return ex.sort_skinned_models_by_bone(models, frag.data.bones)
 
 
 def child_of_bone(obj):

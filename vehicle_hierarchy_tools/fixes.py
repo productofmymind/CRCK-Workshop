@@ -104,7 +104,7 @@ def describe(v, fix):
         return (f"Bone {fix['bone']}: Use Physics on, so its {len(cols)} bound collision(s) are exported as a physics child "
                 "(it becomes a breakable part with its own group; set the mass afterwards if it shows 0)", "physics", False)
     if op == "make_glass_collision":
-        verts, faces = glass_pane(bpy.data.objects[fix["object"]])
+        verts, faces = glass_pane(bpy.data.objects[fix["object"]], fix["bone"])
         return (f"Bone {fix['bone']}: new collision '{fix['bone']}.col' from the pane of {fix['object']} ({len(faces)} triangles, "
                 f"{glass_collision_name(fix['bone'])}, mass {GLASS_MASS}), bound to the bone, Use Physics on", "physics", False)
     if op == "add_wheel_collision" and not fix.get("donor"):
@@ -208,6 +208,8 @@ def apply(context, v, fixes):
 
 def merge_materials(v, keep, drop):
     keep_m, drop_m = bpy.data.materials.get(keep), {bpy.data.materials.get(n) for n in drop} - {None}
+    if keep_m is None:  # renamed or removed since the check ran: repointing would empty the slots
+        return f"Nothing merged: material {keep} no longer exists. Run the check again."
     slots = 0
     seen = set()
     for m in v.models:
@@ -339,9 +341,10 @@ def glass_collision_name(bone_name):
     return "CAR_GLASS_STRONG" if bone_name.startswith("windscreen") else "CAR_GLASS_WEAK"
 
 
-def glass_pane(model):
+def glass_pane(model, bone_name=None):
     """(vertices, triangles) of a window model's pane in its local space: the outer glass material's faces if it has one,
-    else every face; inner and outer panes sitting on the same spot merge into one."""
+    else every face; inner and outer panes sitting on the same spot merge into one. On a mesh skinned to several bones only
+    the faces weighted to `bone_name` count, so one window does not get every window's glass."""
     import bmesh
     lods = sz.lod_meshes(model)
     if not lods:
@@ -350,7 +353,13 @@ def glass_pane(model):
     glass = {i for i, m in enumerate(mesh.materials) if sz.is_shader_material(m) and m.shader_properties.name == "vehicle_vehglass"}
     bm = bmesh.new()
     bm.from_mesh(mesh)
-    drop = [f for f in bm.faces if glass and f.material_index not in glass]
+    deform = bm.verts.layers.deform.active
+    group = model.vertex_groups.get(bone_name) if bone_name and len(model.vertex_groups) > 1 and sz.child_of_bone(model) is None else None
+    if group is None or deform is None:
+        other = []
+    else:
+        other = [f for f in bm.faces if not all(x[deform].get(group.index, 0.0) > 0.5 for x in f.verts)]
+    drop = list({f for f in bm.faces if glass and f.material_index not in glass} | set(other))
     if drop:
         bmesh.ops.delete(bm, geom=drop, context="FACES")
     bmesh.ops.remove_doubles(bm, verts=bm.verts[:], dist=0.0005)
@@ -364,9 +373,15 @@ def glass_pane(model):
 
 def make_glass_collision(v, bone_name, model_name):
     model = bpy.data.objects[model_name]
-    verts, faces = glass_pane(model)
+    verts, faces = glass_pane(model, bone_name)
     if not faces or v.composite is None:
         return f"{bone_name}: no collision made ({model_name} has no faces or the vehicle has no Bound Composite)."
+    world = model.matrix_world.copy()
+    if world.determinant() < 0:  # a mirrored model: Sollumz exports a bound's triangles as wound, so a mirrored bound faces inwards
+        flip = Matrix.Diagonal((-1.0, 1.0, 1.0, 1.0))
+        world = world @ flip
+        verts = [flip.to_3x3() @ x for x in verts]
+        faces = [f[::-1] for f in faces]
     name = f"{bone_name}.col"
     mesh = bpy.data.meshes.new(name)
     mesh.from_pydata(verts, [], faces)
@@ -375,7 +390,7 @@ def make_glass_collision(v, bone_name, model_name):
     obj = sz.new_bound_geometry(name, mesh, v.composite.users_collection[0])
     obj.child_properties.mass = GLASS_MASS
     obj.parent = v.composite
-    obj.matrix_world = model.matrix_world
+    obj.matrix_world = world
     v.frag.data.bones[bone_name].sollumz_use_physics = True
     bind_objects(v.frag, bone_name, [obj])
     return f"{bone_name}: collision '{obj.name}' ({len(faces)} triangles, {glass_collision_name(bone_name)}) bound to the bone, Use Physics on"

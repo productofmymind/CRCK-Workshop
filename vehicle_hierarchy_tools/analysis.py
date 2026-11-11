@@ -454,7 +454,25 @@ def validate_materials(v):
     out = []
     base, hi = export_order(v)
     usage, bad = material_usage(v)
+    for m in v.models:
+        for lod, mesh in sz.lod_meshes(m):
+            empty = [i for i, mat in enumerate(mesh.materials) if mat is None]
+            if len(mesh.polygons) and not any(sz.is_shader_material(mat) for mat in mesh.materials):
+                out.append(Finding(WARNING, "MODEL_NO_MATERIAL",
+                                   f"{lod} mesh has no Sollumz shader material, so Sollumz leaves its {len(mesh.polygons)} polygons out "
+                                   "of the export (with only a warning in its log). Give it a material, or delete the model if it "
+                                   "is a leftover.", m.name, "object"))
+            if empty:
+                counts = slot_polygons(mesh)
+                held = sum(counts[i] for i in empty)
+                out.append(Finding(ERROR, "EMPTY_MATERIAL_SLOT",
+                                   f"{lod} material slot {', '.join(map(str, empty))} is empty"
+                                   + (f" and holds {held} polygons" if held else "")
+                                   + ". Sollumz's export stops with an error on an empty slot, so nothing is exported. "
+                                   + ("Put a Sollumz shader material in the slot." if held else "Remove the slot."), m.name, "object"))
     for obj, lod, slot, mat, n in bad:
+        if mat is None:
+            continue  # reported above
         out.append(Finding(WARNING, "NON_SOLLUMZ_SLOT",
                            f"{lod} slot {slot} ({mat or 'empty'}) holds {n} polygons but is not a Sollumz shader "
                            "material; Sollumz does not export those polygons with a shader.", obj, "object"))

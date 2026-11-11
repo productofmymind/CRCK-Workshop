@@ -131,8 +131,8 @@ def apply_defaults(mat):
             continue
         old = node.image
         node.image = texture_image(name, is_data="bump" in node.name.lower())
-        if name in GENERATED:
-            node.texture_properties.embedded = True
+        # A shared texture left Embedded would put this placeholder into the yft under the game's texture name and hide the real one.
+        node.texture_properties.embedded = name in GENERATED
         if old is not None and old.users == 0 and not old.filepath and old.name.startswith("Texture"):
             bpy.data.images.remove(old)  # the blank 512x512 Sollumz put there
         done.append((node.name, name))
