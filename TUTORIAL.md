@@ -17,7 +17,7 @@ A Drawable Model that is not in a vehicle yet gets Generate LODs and the materia
 
 ## 2. Check the vehicle
 
-Press **Check Vehicle**. The line under the button counts errors and warnings, and the **Problems** list fills in.
+Press **Check Vehicle**. The line under the button counts errors and warnings, and the **Issues** list fills in.
 
 Click a problem. The box underneath tells you:
 
@@ -55,7 +55,7 @@ Open **Vehicle > Hierarchy** and press **Refresh Hierarchy**. You get one tree: 
 
 ### Move a part
 
-Blender can't drag list rows, so it is grab and drop, in **Hierarchy > Move Parts**:
+Blender can't drag list rows, so it is grab and drop, in **Vehicle > Move Parts**:
 
 1. Select the bone in the viewport (or click the part's row) and press **Grab Selected Bone**.
 2. Select the part you want to drop it on, the same way.
@@ -66,9 +66,8 @@ Blender can't drag list rows, so it is grab and drop, in **Hierarchy > Move Part
 ### Other part tools
 
 - **Auto Arrange** (top of the tab) previews the moves that put parts where vanilla vehicles have them: bones under their usual parents, models and collisions on the bone they are named after. Review the preview, then Apply Changes.
-- **Rename Part** (under Vehicle) renames the bone, its models, collisions, mesh data and vertex groups together.
 - **Local Axes** changes a bone's axes without moving anything you can see. **Align Spin Axis to Geometry** fixes a rotor that wobbles; **Origin to Spin Centre** fixes a hub that circles as it spins.
-- **Bone order:** Up and Down move a bone among its siblings. The bone index follows.
+- **Bone order:** Move Up and Move Down (Move Parts) move a bone among its siblings. The bone index follows.
 
 ## 5. Generate LODs
 
@@ -124,5 +123,5 @@ Select the vehicle's Fragment first. **Estimate Export Size** (same panel) shows
 - **The tab isn't there:** Sollumz must be enabled and a vehicle must be selected. Restart Blender after installing or updating.
 - **A tool says "incompatible":** your Sollumz version differs from the ones this supports (2.8 and newer; tested with 2.9).
 - **Read the preview** before pressing Apply Changes. Ctrl+Z undoes it.
-- **Bug or idea:** open an issue on GitHub with a screenshot of the Problems panel.
+- **Bug or idea:** open an issue on GitHub with a screenshot of the Issues panel.
 - **In game:** bone order, physics groups and shader order are tested and work. The other tools have not been tested in game yet, so check their results there.

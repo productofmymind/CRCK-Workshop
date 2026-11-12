@@ -2,7 +2,7 @@
 
 **CRCK Workshop** is a Blender add-on for GTA V vehicle modding. It sits **on top of [Sollumz](https://github.com/Sollumz/Sollumz)** and adds what a vehicle workflow is missing: a tree view of the vehicle's parts, one-click checks with fixes, whole-vehicle LOD generation, paint and material tools, and a smaller-file export. It replaces nothing Sollumz does.
 
-**Version 0.17.5** · Blender 4.0+ (tested on 5.2.3) · Sollumz 2.8+ (tested with 2.9) · Windows, macOS and Linux · GPL-3.0-or-later
+**Version 0.17.6** · Blender 4.0+ (tested on 5.2.3) · Sollumz 2.8+ (tested with 2.9) · Windows, macOS and Linux · GPL-3.0-or-later
 
 ## What it does, in short
 
@@ -13,7 +13,7 @@
 | Make LODs | **Generate LODs** for the whole vehicle at once (or a model on its own), starting from L0 (`_hi`) or L1 |
 | Paint and materials | Paint layers and liveries, vehicle shaders, default textures, material usage, material order |
 | Ship a smaller file | **CRCK Workshop Export**: Sollumz's own exporter with fine rounding, a vertex merge and cache-friendly ordering that make files about half the size |
-| Fix a wobbling rotor, rename a part, rearrange bones | Local-axes tools, Rename Part, Auto Arrange |
+| Fix a wobbling rotor, rearrange bones | Local-axes tools, Move Parts, Auto Arrange |
 
 New here? Read the step-by-step [tutorial](TUTORIAL.md).
 
@@ -41,8 +41,8 @@ A GTA V vehicle has no object tree. Its hierarchy is a **bone tree** plus the **
 | **Hierarchy** | One tree: fragment root, parts nested in bone order, `[COL]` rows, the LOD slots each part has. Select, expand, hide/isolate, show L0-L4 or COL, Move Up/Down, attach objects or bones to a part. **Grab and drop** moves a part or collision into another part, before/after a sibling, or unlinks it. Search filters rows. |
 | **Auto Arrange** | One preview of the moves that put parts where vanilla vehicles have them: bones under their usual parents, models and collisions on the bone they are named after, nested models back under the Drawable, collisions into the Bound Composite. Nothing moves in space. |
 | **Local Axes** | Center to Object, Reset to Parent/World, Copy From Grabbed, Origin to 3D Cursor (rotation and position switches), **Align Spin Axis to Geometry** and **Origin to Spin Centre**, all without moving geometry, children or collisions. Fixes rotor wobble (a rear rotor spins on local X, a main rotor on local Z) and a hub that orbits. |
-| **Bind Parts, Rename Part, Bone Order** | Bind several objects to one bone, or several bones under one (preview, then Apply, one undo step). Move bones up/down among siblings. **Rename Part** renames bone, models, collisions, mesh data and vertex groups together, with find/replace. Part collections mirror the bone tree in the Outliner. |
-| **Problems** | **Check Vehicle** lists each problem in plain words: what is wrong (with your names), why it matters, how to fix it by hand, and a previewable **quick fix** where one exists. 51 kinds explained, including **wheel bones without a collision** (the quick fix copies another wheel's collision, or builds a disc from the wheel model). Rules are data (`data/vehicle_rules.json`), graded by confidence, and silent on the vanilla vehicles tested. Some checks may still be wrong, so read each one before you apply its fix. If you find one that is wrong, please report it in the Issues tab. |
+| **Move Parts** | **Move Parts** holds everything that changes where a part sits: grab and drop, Move Up/Down among siblings, and putting the selected objects or bones on a part. Part collections mirror the bone tree in the Outliner. |
+| **Check, Issues** | **Check Vehicle** lists each problem in plain words: what is wrong (with your names), why it matters, how to fix it by hand, and a previewable **quick fix** where one exists. 51 kinds explained, including **wheel bones without a collision** (the quick fix copies another wheel's collision, or builds a disc from the wheel model). Rules are data (`data/vehicle_rules.json`), graded by confidence, and silent on the vanilla vehicles tested. Some checks may still be wrong, so read each one before you apply its fix. If you find one that is wrong, please report it in the Issues tab. |
 | **Export Info** | The order Sollumz will actually write, and a size estimate from a trial export (warns at 256 MiB). **CRCK Workshop Export** (also under File > Export) runs Sollumz's exporter with your settings but rounds normals, tangents, positions and UVs to a very fine grid (0.05 degrees, 0.06 mm), merges equal vertices and reorders triangles for the GPU's vertex cache (Tipsify; a mesh another tool already ordered keeps its order when that compresses smaller): a test vehicle re-exported 51% smaller than with Sollumz alone (3.73 MB to 1.83 MB, measured with the earlier meshoptimizer ordering, which the new one matched within 0.1% on the vehicle it was compared on), with the same triangles. |
 
 ### Materials

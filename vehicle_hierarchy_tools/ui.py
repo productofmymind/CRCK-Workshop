@@ -1,4 +1,4 @@
-"""The sidebar: one tab, CRCK Workshop. Top: status, Check Vehicle, the preview of any change, then Problems; below, a few groups (Vehicle,
+"""The sidebar: one tab, CRCK Workshop. Top: Check (status, Check Vehicle, the preview of any change), then Issues; below, a few groups (Vehicle,
 Generate LODs, Materials, Export Info) whose tools are short sub-panels, closed until needed. Explanations are tooltips, or shown in the
 panels with the Hints switch in the main panel."""
 import textwrap
@@ -185,7 +185,7 @@ class VHT_PT_main(bpy.types.Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = CATEGORY
-    bl_label = "CRCK Workshop"
+    bl_label = "Check"
 
     def draw_header(self, context):
         head(self.layout, "AUTO", "vehicle")
@@ -253,16 +253,15 @@ class VHT_PT_main(bpy.types.Panel):
 
 
 class VHT_PT_problems(Sub):
-    bl_label = "Problems"
+    bl_label = "Issues"
     icon = "ERROR"
 
     @classmethod
     def poll(cls, context):
         return has_vehicle(context) and bool(context.window_manager.vht.findings)
 
-    def draw_header(self, context):
+    def draw_header_preset(self, context):  # the count of errors and warnings, at the right of the header
         st = context.window_manager.vht
-        head(self.layout, self.icon)
         self.layout.label(text=str(sum(1 for f in st.findings if f.severity in ("ERROR", "WARNING"))))
 
     def draw(self, context):
@@ -314,7 +313,7 @@ class VHT_PT_vehicle_group(Sub):
     icon = "OUTLINER_OB_ARMATURE"
 
     def draw(self, context):
-        hint(self.layout, "The parts of the vehicle: the tree, local axes, binding, renaming and bone order.")
+        hint(self.layout, "The parts of the vehicle: the tree, moving parts and local axes.")
 
 
 class VHT_PT_hierarchy(Sub):
@@ -348,39 +347,44 @@ class VHT_PT_hierarchy(Sub):
         row.operator("vht.tree_show", text="Isolate").mode = "ISOLATE"
         row.operator("vht.tree_show", text="Show").mode = "SHOW"
         row.operator("vht.tree_show", text="Hide").mode = "HIDE"
+        row = layout.row(align=True)
+        row.operator("vht.build_parts", icon="OUTLINER_COLLECTION")
+        row.operator("vht.remove_parts", text="", icon="X")
 
 
 class VHT_PT_tree_move(Sub):
+    """Everything that changes where a part sits in the skeleton, in one place: grab and drop, order among siblings, and putting the
+    selected objects or bones on a part."""
     bl_label = "Move Parts"
-    bl_parent_id = "VHT_PT_hierarchy"
+    bl_parent_id = "VHT_PT_vehicle_group"
     bl_options = {"DEFAULT_CLOSED"}
-
-    @classmethod
-    def poll(cls, context):
-        frag = sz.find_fragment(context.active_object) if has_vehicle(context) else None
-        st = context.window_manager.vht
-        return frag is not None and bool(st.tree) and st.fragment == frag.name
 
     def draw(self, context):
         layout = self.layout
         st = context.window_manager.vht
-        box = layout.column(align=True)
+        frag = sz.find_fragment(context.active_object)
+        if not st.tree or st.fragment != frag.name:
+            layout.operator("vht.inspect", text="Read Hierarchy", icon="FILE_REFRESH")
+            return
+        hint(layout, "Select a bone in the viewport (or click a row in Hierarchy). Grab it, select the target part, then drop it Into, "
+                     "Before or After it. Geometry and collisions stay where they are.")
+        box = layout.box()
+        col = box.column(align=True)
         if st.tree_grab:
-            row = box.row(align=True)
+            row = col.row(align=True)
             row.label(text="Holding: " + st.tree_grab.split(":", 1)[1], icon="PIVOT_CURSOR")
             row.operator("vht.tree_grab", text="", icon="X").cancel = True
-            box.label(text="Select the target part, then drop:")
-            row = box.row(align=True)
+            col.label(text="Select the target part, then drop:")
+            row = col.row(align=True)
             for mode, label in (("INTO", "Into"), ("BEFORE", "Before"), ("AFTER", "After")):
                 row.operator("vht.tree_drop", text=label).mode = mode
         else:
-            box.operator("vht.tree_grab", text="Grab Selected Bone", icon="PIVOT_CURSOR")
-            hint(layout, "Select a bone (or click a row), grab it, select the target part, then drop it Into, Before or After it.")
-        box.operator("vht.tree_drop", text="Unlink from Parent", icon="UNLINKED").mode = "UNLINK"
+            col.operator("vht.tree_grab", text="Grab Selected Bone", icon="PIVOT_CURSOR")
+        col.operator("vht.tree_drop", text="Unlink from Parent", icon="UNLINKED").mode = "UNLINK"
         row = box.row(align=True)
         row.operator("vht.tree_move", text="Move Up", icon="TRIA_UP").direction = "UP"
         row.operator("vht.tree_move", text="Move Down", icon="TRIA_DOWN").direction = "DOWN"
-        col = layout.column(align=True)
+        col = box.column(align=True)
         col.operator("vht.tree_attach", text="Put Selected Objects on This Part", icon="CONSTRAINT_BONE")
         col.operator("vht.tree_adopt", text="Put Selected Bones Under This Part", icon="LINKED")
 
@@ -478,59 +482,6 @@ class VHT_PT_axes(Sub):
         col.operator("vht.tree_axes", text="Origin to Spin Centre", icon="PIVOT_MEDIAN").mode = "SPIN"
         col.operator("vht.tree_axes", text="Origin to 3D Cursor", icon="CURSOR").mode = "CURSOR"
         col.operator("vht.tree_axes", text="Copy From Grabbed", icon="COPYDOWN").mode = "COPY"
-
-
-class VHT_PT_couple(Sub):
-    bl_label = "Bind Parts"
-    bl_parent_id = "VHT_PT_vehicle_group"
-    bl_options = {"DEFAULT_CLOSED"}
-
-    def draw(self, context):
-        layout = self.layout
-        st = context.window_manager.vht
-        frag = sz.find_fragment(context.active_object)
-        hint(layout, "A part is a bone plus the objects bound to it. Put the selected objects on one part, or the selected bones under "
-                     "one part. These only fill the change preview.")
-        col = layout.column(align=True)
-        col.prop_search(st, "couple_bone", frag.data, "bones", text="Part")
-        col.operator("vht.couple_objects", icon="CONSTRAINT_BONE")
-        layout.operator("vht.couple_bones", icon="LINKED")
-
-
-class VHT_PT_rename(Sub):
-    bl_label = "Rename Part"
-    bl_parent_id = "VHT_PT_vehicle_group"
-    bl_options = {"DEFAULT_CLOSED"}
-
-    def draw(self, context):
-        box = self.layout.column()
-        st = context.window_manager.vht
-        hint(box, "Renames the bone and the objects named after it, together.")
-        box.prop(st, "rename_scope", text="")
-        if st.rename_scope == "ACTIVE":
-            box.prop(st, "rename_replace", text="Name")
-            box.prop(st, "rename_find", text="Find")
-        else:
-            box.prop(st, "rename_find", text="Find")
-            box.prop(st, "rename_replace", text="Replace with")
-        box.operator("vht.rename_part", icon="HIDE_OFF")
-
-
-class VHT_PT_bone_order(Sub):
-    bl_label = "Bone Order"
-    bl_parent_id = "VHT_PT_vehicle_group"
-    bl_options = {"DEFAULT_CLOSED"}
-
-    def draw(self, context):
-        layout = self.layout
-        hint(layout, "The order of the bones is their index in the export. Move the active part among its siblings. The collections "
-                     "mirror the part tree in the Outliner and change nothing in the export.")
-        row = layout.row(align=True)
-        row.operator("vht.move_bone", text="Up", icon="TRIA_UP").direction = "UP"
-        row.operator("vht.move_bone", text="Down", icon="TRIA_DOWN").direction = "DOWN"
-        row = layout.row(align=True)
-        row.operator("vht.build_parts", icon="OUTLINER_COLLECTION")
-        row.operator("vht.remove_parts", text="", icon="X")
 
 
 # --- materials ---------------------------------------------------------------
@@ -753,7 +704,6 @@ class VHT_PT_order(Sub):
 
 
 classes = (VHT_UL_findings, VHT_UL_materials, VHT_UL_paint, VHT_UL_usage, VHT_UL_hierarchy,
-           VHT_PT_main, VHT_PT_problems, VHT_PT_vehicle_group, VHT_PT_hierarchy, VHT_PT_tree_move, VHT_PT_axes, VHT_PT_couple, VHT_PT_rename,
-           VHT_PT_bone_order, VHT_PT_lods, VHT_PT_lod_quality,
+           VHT_PT_main, VHT_PT_problems, VHT_PT_vehicle_group, VHT_PT_hierarchy, VHT_PT_tree_move, VHT_PT_axes, VHT_PT_lods, VHT_PT_lod_quality,
            VHT_PT_materials_group, VHT_PT_mat_paint, VHT_PT_mat_shader, VHT_PT_mat_add, VHT_PT_mat_livery, VHT_PT_mat_textures, VHT_PT_mat_usage, VHT_PT_mat_transfer, VHT_PT_materials,
            VHT_PT_order)

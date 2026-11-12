@@ -980,7 +980,7 @@ def t_every_panel_draws_with_hints_on_and_off():
     parents = {c.__name__ for c in panels}
     assert all(getattr(c, "bl_parent_id", "") in parents | {""} for c in panels), "every sub-panel names a registered parent"
     top = [c.bl_label for c in panels if not getattr(c, "bl_parent_id", "")]
-    assert top == ["CRCK Workshop", "Problems", "Vehicle", "Generate LODs", "Materials", "Export Info"], top
+    assert top == ["Check", "Issues", "Vehicle", "Generate LODs", "Materials", "Export Info"], top
     closed = [c.bl_label for c in panels if getattr(c, "bl_parent_id", "") and "DEFAULT_CLOSED" not in getattr(c, "bl_options", set())]
     assert not closed, f"sub-panels start closed: {closed}"
     assert bpy.ops.vht.validate() == {"FINISHED"} and bpy.ops.vht.inspect() == {"FINISHED"} and bpy.ops.vht.suggest() == {"FINISHED"}
@@ -993,10 +993,11 @@ def t_every_panel_draws_with_hints_on_and_off():
             self = types.SimpleNamespace(layout=mock.MagicMock(), icon=getattr(c, "icon", "NONE"), icon_name=getattr(c, "icon_name", None),
                                          bl_parent_id=getattr(c, "bl_parent_id", ""))
             c.draw(self, bpy.context)
-            if hasattr(c, "draw_header"):
-                c.draw_header(self, bpy.context)
+            for extra in ("draw_header", "draw_header_preset"):
+                if hasattr(c, extra):
+                    getattr(c, extra)(self, bpy.context)
             drawn += 1
-    assert drawn >= 2 * 18, drawn
+    assert drawn >= 2 * 15, drawn
     st.show_hints = False
 
 
