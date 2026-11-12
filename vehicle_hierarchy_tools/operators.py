@@ -467,22 +467,30 @@ def selected_part(v):
     return picked[0] if picked and picked[0] else None
 
 
+def follow(st, v):
+    """Make the part picked in the viewport or Outliner the active row, if the selection changed there since the last click on a row.
+    Returns True when it did: the row then stands for that selection, not for an earlier click in the list."""
+    token = bone_token(v.frag)
+    if token == st.seen_bone:
+        return False
+    st.seen_bone = token
+    picked = selected_part(v)
+    if picked in v.frag.data.bones:
+        for i, r in enumerate(st.tree):
+            if r.kind == "node" and r.bone == picked:
+                st.tree_index = i  # fires select_node, which resets the token: set it again after
+                st.seen_bone = bone_token(v.frag)
+                return True
+    return False
+
+
 def active_node_bone(op, context, v, follow_selection=False):
     """The part the tools act on: the hierarchy row, unless the selection changed elsewhere (viewport, Outliner) since the last click on a row,
     in which case that part becomes the row. Only the tools that act on the part itself ask for this; attach and adopt use the selection as
     their input, so for them the row is the target."""
     st = state(context)
-    token = bone_token(v.frag)
-    if follow_selection and token != st.seen_bone:
-        st.seen_bone = token
-        picked = selected_part(v)
-        if picked in v.frag.data.bones:
-            for i, r in enumerate(st.tree):
-                if r.kind == "node" and r.bone == picked:
-                    st.seen_bone = token
-                    st.tree_index = i  # fires select_node, which resets the token: set it again after
-                    st.seen_bone = bone_token(v.frag)
-                    break
+    if follow_selection:
+        follow(st, v)
     row = active_row(st)
     if row is None or row.kind == "root" or row.bone not in v.frag.data.bones:
         op.report({"ERROR"}, "Click a part in the hierarchy first.")
@@ -611,7 +619,7 @@ class VHT_OT_tree_col(bpy.types.Operator):
 class VHT_OT_tree_move(bpy.types.Operator):
     bl_idname = "vht.tree_move"
     bl_label = "Move Node"
-    bl_description = ("Move the active part up or down among its siblings; bone indices follow the new order. "
+    bl_description = ("Move the selected part up or down among its siblings; bone indices follow the new order. "
                       "Recreates the affected sibling bones and verifies every bone afterwards. Ctrl+Z undoes it")
     bl_options = {"REGISTER", "UNDO"}
     direction: EnumProperty(items=[("UP", "Up", ""), ("DOWN", "Down", "")])
@@ -620,7 +628,7 @@ class VHT_OT_tree_move(bpy.types.Operator):
         v = get_vehicle(self, context)
         if v is None:
             return {"CANCELLED"}
-        bone = active_node_bone(self, context, v)
+        bone = active_node_bone(self, context, v, follow_selection=True)
         if bone is None:
             return {"CANCELLED"}
         delta = -1 if self.direction == "UP" else 1
@@ -638,8 +646,8 @@ class VHT_OT_tree_move(bpy.types.Operator):
 class VHT_OT_tree_grab(bpy.types.Operator):
     bl_idname = "vht.tree_grab"
     bl_label = "Grab"
-    bl_description = ("Pick up the active part (or a [COL] row) so it can be dropped into another part, placed before or after a "
-                      "sibling, or unlinked. Blender cannot drag rows with the mouse from Python, so this is grab and drop")
+    bl_description = ("Pick up the selected part: the bone or object selected in the viewport, or the row clicked in the list (a [COL] row "
+                      "picks up that collision). Then select the target part and drop it into, before or after it")
     cancel: bpy.props.BoolProperty(default=False)
 
     def execute(self, context):
@@ -647,9 +655,13 @@ class VHT_OT_tree_grab(bpy.types.Operator):
         if self.cancel:
             st.tree_grab = ""
             return {"FINISHED"}
+        v = get_vehicle(self, context)
+        if v is None:
+            return {"CANCELLED"}
+        follow(st, v)  # a bone or object selected in the viewport since the last row click is what gets grabbed
         row = active_row(st)
-        if row is None or row.kind == "root":
-            self.report({"ERROR"}, "Click a part or a [COL] row first.")
+        if row is None or row.kind == "root" or (row.kind == "node" and row.bone not in v.frag.data.bones):
+            self.report({"ERROR"}, "Select a bone or a part of the vehicle first.")
             return {"CANCELLED"}
         st.tree_grab = ("col:" + row.objects) if row.kind == "col" else ("node:" + row.bone)
         return {"FINISHED"}
@@ -658,7 +670,7 @@ class VHT_OT_tree_grab(bpy.types.Operator):
 class VHT_OT_tree_drop(bpy.types.Operator):
     bl_idname = "vht.tree_drop"
     bl_label = "Drop"
-    bl_description = ("Drop the grabbed part relative to the active row: into it (as a child), before or after it (as a sibling), or "
+    bl_description = ("Drop the grabbed part relative to the selected part: into it (as a child), before or after it (as a sibling), or "
                       "unlink it from its parent into its own top-level tree. With nothing grabbed, Unlink acts on the active part. "
                       "A skeleton needs one root, so re-attach before exporting. Ctrl+Z undoes it")
     bl_options = {"REGISTER", "UNDO"}
@@ -670,11 +682,12 @@ class VHT_OT_tree_drop(bpy.types.Operator):
             return {"CANCELLED"}
         st = state(context)
         grabbed = st.tree_grab
+        follow(st, v)  # the target is the part selected now, in the viewport or in the list
         target = active_row(st)
         arm = v.frag.data
         if self.mode == "UNLINK" and not grabbed:
             if target is None or target.kind != "node":
-                self.report({"ERROR"}, "Click a part first.")
+                self.report({"ERROR"}, "Select a part first.")
                 return {"CANCELLED"}
             grabbed = "node:" + target.bone
         if not grabbed:
@@ -682,7 +695,7 @@ class VHT_OT_tree_drop(bpy.types.Operator):
             return {"CANCELLED"}
         kind, _, name = grabbed.partition(":")
         if self.mode != "UNLINK" and (target is None or target.kind == "col"):
-            self.report({"ERROR"}, "Click the part to drop onto.")
+            self.report({"ERROR"}, "Select the part to drop onto.")
             return {"CANCELLED"}
         if kind == "col":  # dropping a collision into a part binds it to that part's bone
             if self.mode != "INTO" or target.kind != "node":

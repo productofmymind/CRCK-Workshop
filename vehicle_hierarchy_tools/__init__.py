@@ -10,7 +10,7 @@ bl_info = {
     "author": "George",
     "description": "Vehicle tools for Sollumz: part tree, fixes, LODs, export",
     "blender": (4, 0, 0),
-    "version": (0, 17, 4),
+    "version": (0, 17, 5),
     "category": "Import-Export",
 }
 
@@ -148,6 +148,8 @@ class VHT_State(bpy.types.PropertyGroup):
     show_warning: BoolProperty(default=True)
     show_info: BoolProperty(default=False)
     show_review: BoolProperty(default=True)
+    show_hints: BoolProperty(name="Hints", default=False,
+                             description="Show a short explanation at the top of each panel. Off keeps the panels short")
     couple_bone: StringProperty(name="Part", description="Bone that the selected objects are coupled to")
 
 

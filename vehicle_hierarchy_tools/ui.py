@@ -1,5 +1,6 @@
-"""The sidebar: one tab, CRCK Workshop. Top: status, Check Vehicle, the preview of any change, then Problems; below, collapsible panels for
-the hierarchy, local axes, parts, materials (paint, livery, textures, order) and export info."""
+"""The sidebar: one tab, CRCK Workshop. Top: status, Check Vehicle, the preview of any change, then Problems; below, a few groups (Vehicle,
+Generate LODs, Materials, Export Info) whose tools are short sub-panels, closed until needed. Explanations are tooltips, or shown in the
+panels with the Hints switch in the main panel."""
 import textwrap
 
 import bpy
@@ -23,6 +24,12 @@ def wrap(layout, text, width=None, icon=None, offset=0):
         for i, line in enumerate(textwrap.wrap(para, width or chars(offset)) or [""]):
             col.label(text=line, icon=icon if (icon and i == 0) else "NONE")
     return col
+
+
+def hint(layout, text):
+    """An explanation of a panel, drawn only while Hints is on (the ? in the main panel): the panels stay short otherwise."""
+    if bpy.context.window_manager.vht.show_hints:
+        wrap(layout, text)
 
 
 def count(n, word):
@@ -67,7 +74,8 @@ class Sub(bpy.types.Panel):
         return has_vehicle(context)
 
     def draw_header(self, context):
-        head(self.layout, self.icon, self.icon_name)
+        if not getattr(self, "bl_parent_id", ""):  # the groups carry an icon; their sub-panels are plain rows
+            head(self.layout, self.icon, self.icon_name)
 
 
 # --- lists ------------------------------------------------------------------
@@ -194,13 +202,17 @@ class VHT_PT_main(bpy.types.Panel):
         if frag is None:
             models = lone(context)
             if models:
-                layout.label(text=models[0].name if len(models) == 1 else f"{len(models)} models", icon="MESH_DATA")
+                row = layout.row(align=True)
+                row.label(text=models[0].name if len(models) == 1 else f"{len(models)} models", icon="MESH_DATA")
+                row.prop(st, "show_hints", text="", icon="QUESTION", toggle=True)
                 wrap(layout, "Not inside a vehicle: Generate LODs and the material tools work on the selected models. Put it in a "
                              "fragment for the checks and the part tree.")
             else:
                 wrap(layout, "Select a Sollumz vehicle (the fragment, or any part inside it), or a Drawable Model, to start.", icon="INFO")
             return
-        layout.label(text=frag.name, icon="AUTO")
+        row = layout.row(align=True)
+        row.label(text=frag.name, icon="AUTO")
+        row.prop(st, "show_hints", text="", icon="QUESTION", toggle=True)
         layout.prop(st, "profile", text="Type")
 
         col = layout.column(align=True)
@@ -213,10 +225,11 @@ class VHT_PT_main(bpy.types.Panel):
                 layout.label(text=f"{count(n['ERROR'], 'error')}, {count(n['WARNING'], 'warning')}", icon="ERROR")
             else:
                 layout.label(text="No errors or warnings", icon="CHECKMARK")
-        row = layout.row(align=True)
+        col = layout.column(align=True)
+        row = col.row(align=True)
         row.operator("vht.suggest", text="Preview All Quick Fixes", icon="TOOL_SETTINGS")
         row.operator("vht.clear", text="", icon="X")
-        layout.operator("vht.arrange", icon="MOD_ARRAY")
+        col.operator("vht.arrange", icon="MOD_ARRAY")
 
         if st.plan:
             box = layout.box()
@@ -260,9 +273,6 @@ class VHT_PT_problems(Sub):
             n = sum(1 for f in st.findings if f.severity == sev)
             row.prop(st, prop, text=str(n), icon=ICONS[sev], toggle=True)
         layout.template_list("VHT_UL_findings", "", st, "findings", st, "findings_index", rows=5)
-        quick = sum(1 for f in st.findings if f.fix)
-        if quick:
-            layout.label(text=f"{quick} with a quick fix (wrench)", icon="TOOL_SETTINGS")
         if not 0 <= st.findings_index < len(st.findings):
             layout.label(text="Click a problem to see how to fix it", icon="INFO")
             return
@@ -293,9 +303,7 @@ class VHT_PT_problems(Sub):
             fix.operator("vht.fix_finding", icon="HIDE_OFF")
         else:
             fix.label(text="No quick fix: do the steps by hand", icon="INFO")
-        sub = box.column(align=True)
-        sub.separator()
-        wrap(sub, explain.SEVERITY[f.severity])
+        hint(box, explain.SEVERITY[f.severity])
 
 
 # --- hierarchy ---------------------------------------------------------------
@@ -306,55 +314,68 @@ class VHT_PT_vehicle_group(Sub):
     icon = "OUTLINER_OB_ARMATURE"
 
     def draw(self, context):
-        wrap(self.layout, "The parts of the vehicle: the tree, local axes, renaming and bone order.")
+        hint(self.layout, "The parts of the vehicle: the tree, local axes, binding, renaming and bone order.")
 
 
 class VHT_PT_hierarchy(Sub):
     bl_label = "Hierarchy"
     bl_parent_id = "VHT_PT_vehicle_group"
-    icon = "OUTLINER"
+    bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
         layout = self.layout
         st = context.window_manager.vht
         frag = sz.find_fragment(context.active_object)
+        loaded = bool(st.tree) and st.fragment == frag.name
         row = layout.row(align=True)
-        row.scale_y = 1.2
-        row.operator("vht.inspect", text="Refresh Hierarchy", icon="FILE_REFRESH")
-        if not st.tree or st.fragment != frag.name:
-            wrap(layout, "Press Refresh to read this vehicle. Nesting sets bone parents, order sets bone indices, and "
+        row.operator("vht.inspect", text="Refresh" if loaded else "Read Hierarchy", icon="FILE_REFRESH")
+        if loaded:
+            row.operator("vht.tree_expand", text="", icon="DISCLOSURE_TRI_DOWN").mode = "ALL"
+            row.operator("vht.tree_expand", text="", icon="DISCLOSURE_TRI_RIGHT").mode = "NONE"
+        if not loaded:
+            hint(layout, "Press Refresh to read this vehicle. Nesting sets bone parents, order sets bone indices, and "
                          "geometry and collision belong to the part they sit in.")
             return
         # LOD slot buttons : which slot of every part is displayed
         models = [o for o in frag.children_recursive if sz.sollum_type(o) == sz.DRAWABLE_MODEL]
         current = models[0].sz_lods.active_lod_level if models else ""
         row = layout.row(align=True)
-        row.label(text="Show:")
         for i, lvl in enumerate(("sollumz_veryhigh", "sollumz_high", "sollumz_medium", "sollumz_low", "sollumz_verylow")):
             row.operator("vht.tree_lod", text=f"L{i}", depress=(current == lvl)).level = i
         row.operator("vht.tree_col", text="COL", depress=bool(context.scene.sollumz_show_collisions))
         layout.template_list("VHT_UL_hierarchy", "", st, "tree", st, "tree_index", rows=12)
         row = layout.row(align=True)
-        row.operator("vht.tree_expand", text="Expand", icon="DISCLOSURE_TRI_DOWN").mode = "ALL"
-        row.operator("vht.tree_expand", text="Collapse", icon="DISCLOSURE_TRI_RIGHT").mode = "NONE"
-        row = layout.row(align=True)
-        row.operator("vht.tree_show", text="Isolate", icon="ZOOM_SELECTED").mode = "ISOLATE"
-        row.operator("vht.tree_show", text="Show", icon="HIDE_OFF").mode = "SHOW"
-        row.operator("vht.tree_show", text="Hide", icon="HIDE_ON").mode = "HIDE"
+        row.operator("vht.tree_show", text="Isolate").mode = "ISOLATE"
+        row.operator("vht.tree_show", text="Show").mode = "SHOW"
+        row.operator("vht.tree_show", text="Hide").mode = "HIDE"
 
-        box = layout.box()
-        box.label(text="Move a part", icon="PIVOT_CURSOR")
+
+class VHT_PT_tree_move(Sub):
+    bl_label = "Move Parts"
+    bl_parent_id = "VHT_PT_hierarchy"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    @classmethod
+    def poll(cls, context):
+        frag = sz.find_fragment(context.active_object) if has_vehicle(context) else None
+        st = context.window_manager.vht
+        return frag is not None and bool(st.tree) and st.fragment == frag.name
+
+    def draw(self, context):
+        layout = self.layout
+        st = context.window_manager.vht
+        box = layout.column(align=True)
         if st.tree_grab:
             row = box.row(align=True)
             row.label(text="Holding: " + st.tree_grab.split(":", 1)[1], icon="PIVOT_CURSOR")
             row.operator("vht.tree_grab", text="", icon="X").cancel = True
-            wrap(box, "Click the part to drop it on, then choose:")
+            box.label(text="Select the target part, then drop:")
             row = box.row(align=True)
             for mode, label in (("INTO", "Into"), ("BEFORE", "Before"), ("AFTER", "After")):
                 row.operator("vht.tree_drop", text=label).mode = mode
         else:
-            box.operator("vht.tree_grab", text="Grab the Selected Row", icon="PIVOT_CURSOR")
-            wrap(box, "Then click the target part and Drop it Into, Before or After it.")
+            box.operator("vht.tree_grab", text="Grab Selected Bone", icon="PIVOT_CURSOR")
+            hint(layout, "Select a bone (or click a row), grab it, select the target part, then drop it Into, Before or After it.")
         box.operator("vht.tree_drop", text="Unlink from Parent", icon="UNLINKED").mode = "UNLINK"
         row = box.row(align=True)
         row.operator("vht.tree_move", text="Move Up", icon="TRIA_UP").direction = "UP"
@@ -376,55 +397,64 @@ class VHT_PT_lods(Sub):
     def draw(self, context):
         layout = self.layout
         st = context.window_manager.vht
-        wrap(layout, "Fills the LOD slots below the start level, from L0 (_hi) or from the existing L1. Material borders, UVs and shading are kept; "
+        hint(layout, "Fills the LOD slots below the start level, from L0 (_hi) or from the existing L1. Material borders, UVs and shading are kept; "
                      "wheels, glass, lights and mirrors keep extra detail. The start meshes are never changed.")
-        layout.prop(st, "lod_scope", text="")
-        layout.prop(st, "lod_start")
+        col = layout.column(align=True)
+        col.prop(st, "lod_scope", text="")
+        col.prop(st, "lod_start", text="From")
         frag = sz.find_fragment(context.active_object)
         if frag is not None or lone(context):
             from . import analysis, lodgen
             models = analysis.load(frag).models if frag is not None else lone(context)
             have = lodgen.slot_counts(models)
-            box = layout.box()
-            box.label(text=f"Parts with a mesh in each level (of {len(models)}):")
-            row = box.row(align=True)
-            for i, (s, _) in enumerate(lodgen.LEVELS):
-                row.label(text=f"L{i} {have[s]}")
+            layout.label(text=f"{len(models)} parts:  " + "  ".join(f"L{i} {have[s]}" for i, (s, _) in enumerate(lodgen.LEVELS)))
             missing = len(models) - have[st.lod_start]
             if missing:
-                box.label(text=f"{missing} part(s) have no L{lodgen.SLOT_INDEX[st.lod_start]} mesh and will be skipped", icon="ERROR")
+                layout.label(text=f"{missing} part(s) have no L{lodgen.SLOT_INDEX[st.lod_start]} mesh and will be skipped", icon="ERROR")
         col = layout.column(align=True)
-        col.label(text="Triangles kept (of the start mesh, 0 = skip)")
+        col.label(text="Triangles kept (0 = skip)")
         if st.lod_start == "very_high":
             col.prop(st, "lod_high", slider=True)
         col.prop(st, "lod_medium", slider=True)
         col.prop(st, "lod_low", slider=True)
         col.prop(st, "lod_very_low", slider=True)
+        col = layout.column(align=True)
         if st.lod_start == "high":
-            layout.prop(st, "lod_make_hi")
-        layout.prop(st, "lod_overwrite")
-        box = layout.box()
-        box.label(text="Quality", icon="PREFERENCES")
-        box.prop(st, "lod_method")
-        box.prop(st, "lod_protect", slider=True)
-        box.prop(st, "lod_shading")
-        box.prop(st, "lod_chain")
+            col.prop(st, "lod_make_hi")
+        col.prop(st, "lod_overwrite")
         row = layout.row()
         row.scale_y = 1.3
         row.operator("vht.lods_generate", icon="MOD_DECIM")
+
+
+class VHT_PT_lod_quality(Sub):
+    bl_label = "Quality"
+    bl_parent_id = "VHT_PT_lods"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    @classmethod
+    def poll(cls, context):
+        return has_model(context)
+
+    def draw(self, context):
+        col = self.layout.column()
+        st = context.window_manager.vht
+        col.prop(st, "lod_method")
+        col.prop(st, "lod_protect", slider=True)
+        col.prop(st, "lod_shading")
+        col.prop(st, "lod_chain")
 
 
 class VHT_PT_axes(Sub):
     bl_label = "Local Axes"
     bl_parent_id = "VHT_PT_vehicle_group"
     bl_options = {"DEFAULT_CLOSED"}
-    icon = "ORIENTATION_LOCAL"
 
     def draw(self, context):
         layout = self.layout
         st = context.window_manager.vht
         frag = sz.find_fragment(context.active_object)
-        wrap(layout, "The axes of the active part decide what a rotor spins on or a door swings around. These keep "
+        hint(layout, "The axes of the active part decide what a rotor spins on or a door swings around. These keep "
                      "geometry, children and collisions where they are.")
         row = st.tree[st.tree_index] if 0 <= st.tree_index < len(st.tree) else None
         picked = sz.selected_bones(frag) if context.mode == "POSE" else []
@@ -451,25 +481,31 @@ class VHT_PT_axes(Sub):
 
 
 class VHT_PT_couple(Sub):
-    bl_label = "Parts and Bone Order"
+    bl_label = "Bind Parts"
     bl_parent_id = "VHT_PT_vehicle_group"
     bl_options = {"DEFAULT_CLOSED"}
-    icon = "BONE_DATA"
 
     def draw(self, context):
         layout = self.layout
         st = context.window_manager.vht
         frag = sz.find_fragment(context.active_object)
-        wrap(layout, "A part is a bone plus the objects bound to it. These only fill the change preview.")
-        box = layout.box()
-        box.label(text="Put several objects on one part", icon="MESH_DATA")
-        box.prop_search(st, "couple_bone", frag.data, "bones", text="Part")
-        box.operator("vht.couple_objects", icon="CONSTRAINT_BONE")
-        box = layout.box()
-        box.label(text="Put several parts under one part", icon="BONE_DATA")
-        box.operator("vht.couple_bones", icon="LINKED")
-        box = layout.box()
-        box.label(text="Rename part", icon="TEXT")
+        hint(layout, "A part is a bone plus the objects bound to it. Put the selected objects on one part, or the selected bones under "
+                     "one part. These only fill the change preview.")
+        col = layout.column(align=True)
+        col.prop_search(st, "couple_bone", frag.data, "bones", text="Part")
+        col.operator("vht.couple_objects", icon="CONSTRAINT_BONE")
+        layout.operator("vht.couple_bones", icon="LINKED")
+
+
+class VHT_PT_rename(Sub):
+    bl_label = "Rename Part"
+    bl_parent_id = "VHT_PT_vehicle_group"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        box = self.layout.column()
+        st = context.window_manager.vht
+        hint(box, "Renames the bone and the objects named after it, together.")
         box.prop(st, "rename_scope", text="")
         if st.rename_scope == "ACTIVE":
             box.prop(st, "rename_replace", text="Name")
@@ -478,15 +514,21 @@ class VHT_PT_couple(Sub):
             box.prop(st, "rename_find", text="Find")
             box.prop(st, "rename_replace", text="Replace with")
         box.operator("vht.rename_part", icon="HIDE_OFF")
-        box.label(text="Renames the bone and the objects named after it")
-        box = layout.box()
-        box.label(text="Bone order (export index)", icon="SORTALPHA")
-        row = box.row(align=True)
+
+
+class VHT_PT_bone_order(Sub):
+    bl_label = "Bone Order"
+    bl_parent_id = "VHT_PT_vehicle_group"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        hint(layout, "The order of the bones is their index in the export. Move the active part among its siblings. The collections "
+                     "mirror the part tree in the Outliner and change nothing in the export.")
+        row = layout.row(align=True)
         row.operator("vht.move_bone", text="Up", icon="TRIA_UP").direction = "UP"
         row.operator("vht.move_bone", text="Down", icon="TRIA_DOWN").direction = "DOWN"
-        box = layout.box()
-        box.label(text="Outliner view of the parts", icon="OUTLINER_COLLECTION")
-        row = box.row(align=True)
+        row = layout.row(align=True)
         row.operator("vht.build_parts", icon="OUTLINER_COLLECTION")
         row.operator("vht.remove_parts", text="", icon="X")
 
@@ -495,7 +537,6 @@ class VHT_PT_couple(Sub):
 
 class VHT_PT_materials_group(Sub):
     bl_label = "Materials"
-    bl_options = {"DEFAULT_CLOSED"}
     icon = "MATERIAL"
 
     @classmethod
@@ -503,7 +544,7 @@ class VHT_PT_materials_group(Sub):
         return has_model(context)
 
     def draw(self, context):
-        wrap(self.layout, "Paint colours, liveries, default textures and shader order.")
+        hint(self.layout, "Paint colours, liveries, default textures and shader order.")
 
 
 class MatSub(Sub):
@@ -516,12 +557,12 @@ class MatSub(Sub):
 
 class VHT_PT_mat_paint(MatSub):
     bl_label = "Paint Layers"
-    icon = "BRUSH_DATA"
+    bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
         layout = self.layout
         st = context.window_manager.vht
-        wrap(layout, "Select faces (Edit mode) or models (Object mode), make a paint material the active slot, then press a layer. "
+        hint(layout, "Select faces (Edit mode) or models (Object mode), make a paint material the active slot, then press a layer. "
                      "A colour variant is a copy of the material with another layer.")
         layout.operator("vht.paint_refresh", icon="FILE_REFRESH")
         if st.paint:
@@ -545,12 +586,12 @@ class VHT_PT_mat_paint(MatSub):
 
 class VHT_PT_mat_shader(MatSub):
     bl_label = "Vehicle Shaders"
-    icon = "SHADING_RENDERED"
+    bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
         layout = self.layout
         st = context.window_manager.vht
-        wrap(layout, "Every vehicle shader Sollumz has. A new material starts with the shared textures vanilla vehicles use for it, "
+        hint(layout, "Every vehicle shader Sollumz has. A new material starts with the shared textures vanilla vehicles use for it, "
                      "so you only add the textures that belong to your vehicle.")
         layout.prop(st, "vehicle_shader", text="")
         if st.vehicle_shader:
@@ -576,7 +617,7 @@ class VHT_PT_mat_add(MatSub):
     def draw(self, context):
         layout = self.layout
         st = context.window_manager.vht
-        wrap(layout, "A new paint material from a shader and a layer, put on the selection. Textures start with the names "
+        hint(layout, "A new paint material from a shader and a layer, put on the selection. Textures start with the names "
                      "vanilla vehicles use.")
         layout.prop(st, "paint_shader")
         note = paint.SHADER_NOTES.get(st.paint_shader)
@@ -593,7 +634,7 @@ class VHT_PT_mat_livery(MatSub):
 
     def draw(self, context):
         layout = self.layout
-        wrap(layout, "A livery is the vehicle_paint3_lvr shader: the paint material plus a livery image on the second UV map. "
+        hint(layout, "A livery is the vehicle_paint3_lvr shader: the paint material plus a livery image on the second UV map. "
                      "Make the active paint material a livery, then load the image.")
         layout.operator("vht.paint_livery", icon="MATERIAL")
         obj = context.active_object
@@ -611,7 +652,7 @@ class VHT_PT_mat_textures(MatSub):
 
     def draw(self, context):
         layout = self.layout
-        wrap(layout, "An empty sampler exports no texture name. This fills the ones vanilla vehicles give a generic texture "
+        hint(layout, "An empty sampler exports no texture name. This fills the ones vanilla vehicles give a generic texture "
                      "(spec, dirt, normal, glass, tyres, plates). A sampler for the vehicle's own texture stays empty.")
         layout.operator("vht.fill_textures", icon="TEXTURE")
 
@@ -624,7 +665,7 @@ class VHT_PT_mat_usage(MatSub):
     def draw(self, context):
         layout = self.layout
         st = context.window_manager.vht
-        wrap(layout, "Which materials the vehicle uses, by how many models and polygons (displayed LOD). Click one, then select its users "
+        hint(layout, "Which materials the vehicle uses, by how many models and polygons (displayed LOD). Click one, then select its users "
                      "or replace it everywhere.")
         layout.operator("vht.usage_refresh", icon="FILE_REFRESH")
         if st.usage:
@@ -648,7 +689,7 @@ class VHT_PT_mat_transfer(MatSub):
 
     def draw(self, context):
         layout = self.layout
-        wrap(layout, "Select the models that should receive materials, then the model that has them last (the active one). The materials are "
+        hint(layout, "Select the models that should receive materials, then the model that has them last (the active one). The materials are "
                      "added as new slots and no face changes material. They share the very same materials, so the shader group gets no "
                      "duplicates. Object mode.")
         col = layout.column(align=True)
@@ -668,7 +709,7 @@ class VHT_PT_materials(MatSub):
     def draw(self, context):
         layout = self.layout
         frag = sz.find_fragment(context.active_object)
-        wrap(layout, "The order Sollumz writes the shaders in (its shader index), the shader group order. [A] = alpha bucket.")
+        hint(layout, "The order Sollumz writes the shaders in (its shader index), the shader group order. [A] = alpha bucket.")
         layout.operator("vht.mat_load", icon="IMPORT")
         layout.operator("vht.mat_autosort", icon="SORTALPHA")
         row = layout.row()
@@ -712,6 +753,7 @@ class VHT_PT_order(Sub):
 
 
 classes = (VHT_UL_findings, VHT_UL_materials, VHT_UL_paint, VHT_UL_usage, VHT_UL_hierarchy,
-           VHT_PT_main, VHT_PT_problems, VHT_PT_vehicle_group, VHT_PT_hierarchy, VHT_PT_axes, VHT_PT_couple, VHT_PT_lods,
+           VHT_PT_main, VHT_PT_problems, VHT_PT_vehicle_group, VHT_PT_hierarchy, VHT_PT_tree_move, VHT_PT_axes, VHT_PT_couple, VHT_PT_rename,
+           VHT_PT_bone_order, VHT_PT_lods, VHT_PT_lod_quality,
            VHT_PT_materials_group, VHT_PT_mat_paint, VHT_PT_mat_shader, VHT_PT_mat_add, VHT_PT_mat_livery, VHT_PT_mat_textures, VHT_PT_mat_usage, VHT_PT_mat_transfer, VHT_PT_materials,
            VHT_PT_order)

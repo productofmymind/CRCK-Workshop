@@ -38,6 +38,14 @@ from . import analysis, paint, rules, sollumz_bridge as sz, textures
 GLASS_MASS = 1.0  # every window collision in vanilla merula; cargobob5's vary (3 to 11) with the pane size
 
 
+def _needs_physics(v, fix):
+    """A bind_objects fix that puts a collision on a bone with Use Physics off: Sollumz skips such a collision, so the bone needs it on."""
+    bone = v.frag.data.bones.get(fix["bone"])
+    objs = [bpy.data.objects.get(n) for n in fix["objects"]]
+    return (bone is not None and not bone.sollumz_use_physics
+            and any(o is not None and sz.sollum_type(o).startswith(analysis.BOUND_PREFIX) for o in objs))
+
+
 def material_targets(v, fix):
     """(current, new) export-material lists for a material fix."""
     base, hi = analysis.export_order(v)
@@ -68,7 +76,9 @@ def describe(v, fix):
     if op == "bind_objects":
         return (f"Couple {len(fix['objects'])} object(s) to bone {fix['bone']}: "
                 f"{', '.join(fix['objects'][:4])}{'...' if len(fix['objects']) > 4 else ''} "
-                "(world transforms kept; replaces their current bone constraint)", "object", bool(fix.get("optin")))
+                "(world transforms kept; replaces their current bone constraint)"
+                + ("; Use Physics on for the bone, or Sollumz skips the collision" if _needs_physics(v, fix) else ""),
+                "object", bool(fix.get("optin")))
     if op == "adopt_bound":
         return f"Collision {fix['object']}: parent -> {v.composite.name} (world transform kept)", "object", False
     if op == "rename_part":
@@ -168,7 +178,11 @@ def apply(context, v, fixes):
         elif op == "merge_materials":
             report.append(merge_materials(v, f["keep"], f["drop"]))
         elif op == "bind_objects":
+            physics = _needs_physics(v, f)
             report.append(bind_objects(frag, f["bone"], [bpy.data.objects[n] for n in f["objects"] if n in bpy.data.objects]))
+            if physics:
+                frag.data.bones[f["bone"]].sollumz_use_physics = True
+                report.append(f"{f['bone']}: Use Physics on")
         elif op == "fill_textures":
             done = textures.apply_defaults(bpy.data.materials[f["material"]])
             report.append(f"{f['material']}: {', '.join(f'{s} -> {t}' for s, t in done) or 'nothing to fill'}")

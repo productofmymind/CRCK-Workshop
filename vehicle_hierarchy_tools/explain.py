@@ -51,7 +51,7 @@ CATALOG = {
     "WHEEL_NO_COLLISION": ("Wheel bone has no collision", "The game makes a wheel from a physics group with a collision; a wheel bone without one gets no wheel, so that "
                            "corner of the vehicle shows none. Vanilla vehicles keep the wheel mesh on wheel_lf only; every other wheel has just Use Physics and a disc collision.",
                            "Duplicate the collision of another wheel, rename it after this bone (wheel_lr.col), move it to the wheel, bind it to the bone "
-                           "(Parts and Bone Order) and turn Use Physics on for the bone.",
+                           "(Vehicle > Bind Parts) and turn Use Physics on for the bone.",
                            "Copies the collision of another wheel bone here (or, if none has one, builds a disc from the wheel model), binds it and turns Use Physics on."),
     "PHYSICS_NO_COLLISION": ("Use Physics is on but the bone has no collision", "Sollumz drops the physics group for this bone.",
                              "Bind a collision to the bone, or turn Use Physics off.", None),

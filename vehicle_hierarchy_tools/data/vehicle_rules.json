@@ -171,6 +171,26 @@
       "glass": true,
       "door": "door_pside_r"
     },
+    "window_lm": {
+      "parents": [
+        "chassis",
+        "door_dside_f",
+        "door_dside_r"
+      ],
+      "conf": "L",
+      "glass": true,
+      "why": "A middle window: on the chassis in vanilla, or under the door it is set in, so it moves with that door."
+    },
+    "window_rm": {
+      "parents": [
+        "chassis",
+        "door_pside_f",
+        "door_pside_r"
+      ],
+      "conf": "L",
+      "glass": true,
+      "why": "A middle window: on the chassis in vanilla, or under the door it is set in, so it moves with that door."
+    },
     "doorlight_lf": {
       "parents": [
         "door_dside_f",

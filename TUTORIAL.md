@@ -55,10 +55,10 @@ Open **Vehicle > Hierarchy** and press **Refresh Hierarchy**. You get one tree: 
 
 ### Move a part
 
-Blender can't drag list rows, so it takes two clicks:
+Blender can't drag list rows, so it is grab and drop, in **Hierarchy > Move Parts**:
 
-1. Click the part and press **Grab Selected Row**.
-2. Click the part you want to drop it on.
+1. Select the bone in the viewport (or click the part's row) and press **Grab Selected Bone**.
+2. Select the part you want to drop it on, the same way.
 3. Choose **Into** (becomes its child), **Before** or **After** (becomes its sibling).
 
 **Unlink from Parent** makes a part a top-level bone of its own. Ctrl+Z undoes each move. A part keeps its position, its geometry and its collision when it moves.
@@ -66,13 +66,13 @@ Blender can't drag list rows, so it takes two clicks:
 ### Other part tools
 
 - **Auto Arrange** (top of the tab) previews the moves that put parts where vanilla vehicles have them: bones under their usual parents, models and collisions on the bone they are named after. Review the preview, then Apply Changes.
-- **Rename Part** (Parts and Bone Order) renames the bone, its models, collisions, mesh data and vertex groups together.
+- **Rename Part** (under Vehicle) renames the bone, its models, collisions, mesh data and vertex groups together.
 - **Local Axes** changes a bone's axes without moving anything you can see. **Align Spin Axis to Geometry** fixes a rotor that wobbles; **Origin to Spin Centre** fixes a hub that circles as it spins.
 - **Bone order:** Up and Down move a bone among its siblings. The bone index follows.
 
 ## 5. Generate LODs
 
-Open **Vehicle > Generate LODs**.
+Open **Generate LODs**. The method and detail settings are under **Quality**.
 
 1. **Parts:** every part, or only the selected models.
 2. **Start from:** L1 (high) or L0 (`_hi`). The panel shows how many parts have a mesh in each level, and warns when some have no mesh to start from.
