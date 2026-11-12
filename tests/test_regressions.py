@@ -980,7 +980,7 @@ def t_every_panel_draws_with_hints_on_and_off():
     parents = {c.__name__ for c in panels}
     assert all(getattr(c, "bl_parent_id", "") in parents | {""} for c in panels), "every sub-panel names a registered parent"
     top = [c.bl_label for c in panels if not getattr(c, "bl_parent_id", "")]
-    assert top == ["Check", "Issues", "Vehicle", "Generate LODs", "Materials", "Export Info"], top
+    assert top == ["Check", "Issues", "Vehicle", "Automation", "Materials", "Export Info"], top
     closed = [c.bl_label for c in panels if getattr(c, "bl_parent_id", "") and "DEFAULT_CLOSED" not in getattr(c, "bl_options", set())]
     assert not closed, f"sub-panels start closed: {closed}"
     assert bpy.ops.vht.validate() == {"FINISHED"} and bpy.ops.vht.inspect() == {"FINISHED"} and bpy.ops.vht.suggest() == {"FINISHED"}
@@ -1021,10 +1021,246 @@ def t_grab_and_drop_follow_the_part_selected_in_the_viewport():
     pick("door_m")
     assert bpy.ops.vht.tree_drop(mode="INTO") == {"FINISHED"}
     assert frag.data.bones["boot"].parent.name == "door_dside_f" and st.tree_grab == ""
+    # posing the armature: grabbing a bone picked in the viewport keeps Pose mode and the selection, so the target bone can be picked
+    # the same way (Grab used to switch to Object mode, where a click on a bone only selects the armature and the drop went nowhere)
+    def pose_pick(name):
+        for o in bpy.context.selected_objects:
+            o.select_set(False)
+        frag.select_set(True)
+        bpy.context.view_layer.objects.active = frag
+        if bpy.context.mode != "POSE":
+            bpy.ops.object.mode_set(mode="POSE")
+        vht.operators._select_only_bone(frag, name)
+
+    row = lambda name: next(i for i, r in enumerate(st.tree) if r.kind == "node" and r.bone == name)
+    st.tree_index = row("bonnet")
+    pose_pick("boot")
+    assert bpy.ops.vht.tree_grab() == {"FINISHED"} and st.tree_grab == "node:boot"
+    assert bpy.context.mode == "POSE" and vht.sollumz_bridge.selected_bones(frag) == ["boot"], "Grab leaves the mode and the selection alone"
+    pose_pick("bonnet")
+    assert bpy.ops.vht.tree_drop(mode="INTO") == {"FINISHED"} and frag.data.bones["boot"].parent.name == "bonnet"
+    assert bpy.context.mode == "POSE" and vht.sollumz_bridge.selected_bones(frag) == ["boot"], "after the drop: still posing, the moved bone picked"
+    assert bpy.ops.vht.tree_grab() == {"FINISHED"}
+    try:  # onto itself: refused with a message (an operator's error raises when called from a script), and the part stays held
+        bpy.ops.vht.tree_drop(mode="INTO")
+        raise AssertionError("dropping a part onto itself must be refused")
+    except RuntimeError as e:
+        assert "holding" in str(e), e
+    assert st.tree_grab == "node:boot" and frag.data.bones["boot"].parent.name == "bonnet"
+    assert bpy.ops.vht.tree_grab(cancel=True) == {"FINISHED"}
+    # in Pose mode a click on a row picks that bone and stays in Pose mode, so the list works as a target picker too
+    pose_pick("boot")
+    assert bpy.ops.vht.tree_grab() == {"FINISHED"}
+    st.tree_index = row("door_dside_f")
+    assert bpy.context.mode == "POSE" and vht.sollumz_bridge.selected_bones(frag) == ["door_dside_f"]
+    assert bpy.ops.vht.tree_drop(mode="INTO") == {"FINISHED"} and frag.data.bones["boot"].parent.name == "door_dside_f"
+    bpy.ops.object.mode_set(mode="OBJECT")
     # with no new selection, the row clicked in the list is what gets grabbed (a [COL] row grabs that collision)
     st.tree_index = next(i for i, r in enumerate(st.tree) if r.kind == "col")
     assert bpy.ops.vht.tree_grab() == {"FINISHED"} and st.tree_grab.startswith("col:"), st.tree_grab
     assert bpy.ops.vht.tree_grab(cancel=True) == {"FINISHED"} and st.tree_grab == ""
+
+
+@test
+def t_window_collisions_are_generated_for_every_window_and_rebuilt_when_off_the_pane():
+    from mathutils import Matrix
+    from vehicle_hierarchy_tools import fixes
+    sz = vht.sollumz_bridge
+    frag = build_vehicle()
+    st = bpy.context.window_manager.vht
+    add_bone(frag, "window_rf", "chassis", (-0.9, 0.5, 0.9))
+    add_bone(frag, "windscreen", "chassis", (0.0, 1.0, 1.0))
+    add_model(frag, "window_rf", "window_rf", mat="mat2")              # glass, no collision
+    add_model(frag, "windscreen", "windscreen", mat="mat2")            # two models on one bone: one pane from both
+    far = add_model(frag, "windscreen_2", "windscreen", mat="mat2")
+    far.matrix_basis = Matrix.Translation((1.0, 0.0, 0.0)) @ far.matrix_basis
+    add_bone(frag, "window_lr", "chassis", (0.9, -0.5, 0.9))           # a window bone with nothing on it
+    bpy.context.view_layer.update()
+    states = {b: s for b, s, _ in fixes.window_states(analysis.load(frag))}
+    assert states == {"window_lf": "ok", "window_rf": "missing", "windscreen": "missing", "window_lr": "no_model"}, states
+
+    bpy.context.view_layer.objects.active = frag
+    objs = {o.name: o.matrix_world.copy() for o in bpy.data.objects}
+    assert bpy.ops.vht.window_collisions() == {"FINISHED"}, st.report
+    bpy.context.view_layer.update()
+    assert not [n for n, m in objs.items() if _differs(m, bpy.data.objects[n].matrix_world)], "nothing moves"
+    v = analysis.load(frag)
+    states = {b: s for b, s, _ in fixes.window_states(v)}
+    assert states == {"window_lf": "ok", "window_rf": "ok", "windscreen": "ok", "window_lr": "no_model"}, (states, st.report)
+    side, screen = bpy.data.objects["window_rf.col"], bpy.data.objects["windscreen.col"]
+    assert [m.name.split(".")[0] for m in side.data.materials] == ["CAR_GLASS_WEAK"]
+    assert [m.name.split(".")[0] for m in screen.data.materials] == ["CAR_GLASS_STRONG"]
+    assert sz.child_of_bone(side).name == "window_rf" and frag.data.bones["window_rf"].sollumz_use_physics and side.parent == v.composite
+    assert len(screen.data.vertices) == 16 and len(screen.data.polygons) == 24, "both windscreen models are in the one collision"
+    xs = sorted(round((screen.matrix_world @ x.co).x, 2) for x in screen.data.vertices)
+    assert xs[0] == -0.2 and xs[-1] == 1.2, xs
+    assert not [f for f in analysis.validate(v) if f.code == "HV040_GLASS_NO_COLLISION" and f.target in ("window_rf", "windscreen")]
+    before = len(bpy.data.objects)
+    assert bpy.ops.vht.window_collisions() == {"FINISHED"} and len(bpy.data.objects) == before, "a second run makes nothing"
+
+    # the window is moved after its collision was made: reported, left alone without Replace existing, rebuilt with it
+    model = bpy.data.objects["window_rf"]
+    model.matrix_basis = Matrix.Translation((0.0, 0.0, 0.5)) @ model.matrix_basis
+    bpy.context.view_layer.update()
+    assert dict((b, s) for b, s, _ in fixes.window_states(analysis.load(frag)))["window_rf"] == "off"
+    assert bpy.ops.vht.window_collisions() == {"FINISHED"} and "not on the pane" in st.report
+    st.win_replace = True
+    assert bpy.ops.vht.window_collisions() == {"FINISHED"}, st.report
+    bpy.context.view_layer.update()
+    assert dict((b, s) for b, s, _ in fixes.window_states(analysis.load(frag)))["window_rf"] == "ok", st.report
+    st.win_max_tris = 8  # a pane denser than this is reduced
+    assert bpy.ops.vht.window_collisions() == {"FINISHED"}, st.report
+    bpy.context.view_layer.update()
+    st.win_replace, st.win_max_tris = False, 0
+    cols = [o for o in bpy.data.objects if sz.child_of_bone(o) is not None and sz.child_of_bone(o).name == "window_rf" and o is not model]
+    assert len(cols) == 1 and 0 < len(cols[0].data.polygons) < 12, "one collision, reduced from the pane's 12 triangles"
+    assert "col_window" in bpy.data.objects, "a collision that is not a glass one is never removed"
+
+
+@test
+def t_lods_share_triangles_towards_the_part_that_loses_its_shape():
+    """Two parts: a finely divided flat sheet that can lose almost all its triangles, and a dome that cannot. At the same total, sharing
+    moves triangles from the sheet to the dome and brings the dome closer to its start mesh."""
+    import math
+    import numpy as np
+    from mathutils.bvhtree import BVHTree
+    from vehicle_hierarchy_tools import lodgen
+
+    def grid(name, height, n):
+        verts = [(x / n - 0.5, y / n - 0.5, height(x / n - 0.5, y / n - 0.5)) for y in range(n + 1) for x in range(n + 1)]
+        faces = [(y * (n + 1) + x, y * (n + 1) + x + 1, (y + 1) * (n + 1) + x + 1, (y + 1) * (n + 1) + x) for y in range(n) for x in range(n)]
+        me = bpy.data.meshes.new(name)
+        me.from_pydata(verts, [], faces)
+        return me
+
+    def worst(o, slot):
+        src, lod = o.sz_lods.high.mesh, getattr(o.sz_lods, slot).mesh
+        lod.calc_loop_triangles()
+        tree = BVHTree.FromPolygons([tuple(x.co) for x in lod.vertices], [tuple(t.vertices) for t in lod.loop_triangles])
+        return sum(tree.find_nearest(x.co)[3] for x in src.vertices) / len(src.vertices)  # average distance of the start mesh from it
+
+    def make(share):
+        frag = build_vehicle()
+        mh = sollumz("tools.meshhelper")
+        models = []
+        for name, height, n in (("sheet", lambda x, y: 0.0, 48), ("dome", lambda x, y: 0.4 * math.cos(3 * x) * math.cos(3 * y), 24)):
+            o = add_model(frag, name, "chassis")
+            me = grid(name, height, n)
+            me.materials.append(bpy.data.materials["mat0"])
+            for i in (0, 1, 2):
+                me.uv_layers.new(name=mh.get_uv_map_name(i))
+                me.color_attributes.new(name=mh.get_color_attr_name(i), type="BYTE_COLOR", domain="CORNER")
+            o.data = me
+            o.sz_lods.high.mesh = me
+            models.append(o)
+        rep = lodgen.generate(models, "high", {"medium": 0.5, "low": 0.25, "very_low": 0.1}, False, True, "AUTO", False, 1.0, True, set(), share)
+        return models, rep
+
+    (sheet, dome), rep = make(False)
+    own = {s: (lodgen.triangles(getattr(sheet.sz_lods, s).mesh), lodgen.triangles(getattr(dome.sz_lods, s).mesh)) for s in ("medium", "low", "very_low")}
+    own_err = {s: worst(dome, s) for s in ("medium", "low", "very_low")}
+    own_sheet = worst(sheet, "very_low")
+    assert not rep["shared"], rep
+    (sheet, dome), rep = make(True)
+    assert rep["shared"]
+    for slot in ("medium", "low", "very_low"):
+        a, b = lodgen.triangles(getattr(sheet.sz_lods, slot).mesh), lodgen.triangles(getattr(dome.sz_lods, slot).mesh)
+        assert a <= own[slot][0] and b >= own[slot][1] and (slot != "very_low" or b > own[slot][1]), f"{slot}: triangles move from the sheet to the dome: {own[slot]} -> {(a, b)}"
+        assert a + b <= sum(own[slot]) + 2, f"{slot}: the total does not grow ({a + b} against {sum(own[slot])})"
+        assert a >= 0.3 * own[slot][0] and b <= 3.1 * own[slot][1], "within the limits of the part's own share"
+    now = {s: worst(dome, s) for s in own_err}
+    assert all(now[s] <= own_err[s] for s in now) and now["very_low"] < own_err["very_low"], f"the dome is closer to its start mesh: {own_err} -> {now}"
+    # the sheet pays for it with a little of its outline, far less than the dome gains
+    flat = worst(sheet, "very_low")
+    assert flat < 0.005 and flat + now["very_low"] < own_sheet + own_err["very_low"], (own_sheet, own_err["very_low"], flat, now["very_low"])
+
+
+@test
+def t_misnamed_part_is_named_after_what_hangs_under_it():
+    frag = build_vehicle()
+    sz = vht.sollumz_bridge
+    frag.data.bones["door_dside_f"].name = "door_pside_l"   # a left door named as if "l" were a side
+    bpy.data.objects["door_m"].name = "door_pside_l"
+    found = [f for f in analysis.validate(analysis.load(frag)) if f.code == "HV003_UNKNOWN_BONE" and f.target == "door_pside_l"]
+    assert found and found[0].fix == {"op": "rename_part", "bone": "door_pside_l", "to": "door_dside_f"}, [(f.message, f.fix) for f in found]
+    assert "door_dside_f" in found[0].message and "window_lf" in found[0].message
+    quick_fix(frag, "HV003_UNKNOWN_BONE", "door_pside_l", renamed=("door_pside_l",))
+    assert "door_dside_f" in frag.data.bones and "door_dside_f" in bpy.data.objects, "the bone and the model named after it"
+    assert sz.child_of_bone(bpy.data.objects["door_dside_f"]).name == "door_dside_f"
+    assert frag.data.bones["window_lf"].parent.name == "door_dside_f"
+    # with the armature left in Edit mode Blender ignores a new bone name: the fix leaves Edit mode first, so bone and objects stay together
+    from vehicle_hierarchy_tools import fixes
+    bpy.context.view_layer.objects.active = frag
+    bpy.ops.object.mode_set(mode="EDIT")
+    lines = fixes.apply(bpy.context, analysis.load(frag), [{"op": "rename_part", "bone": "door_dside_f", "to": "door_pside_l"},
+                                                            {"op": "enable_physics", "bone": "bonnet"}])
+    assert "door_pside_l" in frag.data.bones and "door_pside_l" in bpy.data.objects and "door_dside_f" not in frag.data.bones, lines
+    assert frag.data.bones["bonnet"].sollumz_use_physics and not frag.data.is_editmode
+    fixes.apply(bpy.context, analysis.load(frag), [{"op": "rename_part", "bone": "door_pside_l", "to": "door_dside_f"}])
+    # a custom bone with nothing telling what it is gets no guess
+    add_bone(frag, "winch_arm", "chassis", (0.0, 0.0, 1.5))
+    found = [f for f in analysis.validate(analysis.load(frag)) if f.target == "winch_arm" and f.code == "HV003_UNKNOWN_BONE"]
+    assert found and found[0].fix is None
+
+
+@test
+def t_lods_strip_what_cannot_be_seen_from_outside():
+    """A closed shell with a dense ball inside it and a second ball outside. As in vanilla LODs, the hidden ball gives way first and has
+    no mesh at the lowest level; the shell and the ball that shows are treated as before."""
+    import bmesh
+    from vehicle_hierarchy_tools import lodgen
+
+    def solid(name, radius, at, ball):
+        bm = bmesh.new()
+        if ball:
+            bmesh.ops.create_icosphere(bm, subdivisions=3, radius=radius)
+        else:
+            bmesh.ops.create_cube(bm, size=2 * radius)
+            bmesh.ops.subdivide_edges(bm, edges=bm.edges[:], cuts=7, use_grid_fill=True)
+        bmesh.ops.translate(bm, verts=bm.verts[:], vec=at)
+        me = bpy.data.meshes.new(name)
+        bm.to_mesh(me)
+        bm.free()
+        return me
+
+    def make(inside):
+        frag = build_vehicle()
+        mh = sollumz("tools.meshhelper")
+        models = {}
+        for name, radius, at, ball in (("shell", 1.0, (0, 0, 0), False), ("hidden", 0.4, (0, 0, 0), True), ("shown", 0.4, (3, 0, 0), True)):
+            o = add_model(frag, name, "chassis")
+            me = solid(name, radius, at, ball)
+            me.materials.append(bpy.data.materials["mat0"])
+            for i in (0, 1, 2):
+                me.uv_layers.new(name=mh.get_uv_map_name(i))
+                me.color_attributes.new(name=mh.get_color_attr_name(i), type="BYTE_COLOR", domain="CORNER")
+            o.data = me
+            o.sz_lods.high.mesh = me
+            models[name] = o
+        seen = lodgen.seen_from_outside(list(models.values()), "high")
+        share = {n: float(seen[o.sz_lods.high.mesh.as_pointer()].mean()) for n, o in models.items()}
+        rep = lodgen.generate(list(models.values()), "high", {"medium": 0.5, "low": 0.25, "very_low": 0.1}, False, True, "AUTO", False, 1.0, True,
+                              set(), True, inside, list(models.values()))
+        count = {n: {s: (lodgen.triangles(getattr(o.sz_lods, s).mesh) if getattr(o.sz_lods, s).mesh else None) for s in ("high", "medium", "low", "very_low")}
+                 for n, o in models.items()}
+        return share, count, rep
+
+    share, plain, rep = make(1.0)
+    assert share == {"shell": 1.0, "hidden": 0.0, "shown": 1.0}, share
+    assert not rep.get("inside") and all(n is not None for c in plain.values() for n in c.values()), plain
+    share, now, rep = make(0.1)
+    assert rep["inside"] and rep["methods"].get("hidden") == 1, rep
+    assert now["hidden"]["very_low"] is None, "the ball nobody can see has no mesh at the lowest level"
+    assert now["shell"]["very_low"] and now["shown"]["very_low"], now
+    for slot in ("medium", "low"):
+        assert now["hidden"][slot] <= plain["hidden"][slot], f"{slot}: the hidden ball keeps no more than before ({plain['hidden'][slot]} -> {now['hidden'][slot]})"
+        assert now["shown"][slot] >= plain["shown"][slot], f"{slot}: the ball that shows does not pay for it ({plain['shown'][slot]} -> {now['shown'][slot]})"
+    visible = lambda c: c["shown"]["very_low"] + c["shell"]["very_low"]
+    assert visible(now) >= visible(plain), f"what shows keeps at least what it had at the lowest level ({visible(plain)} -> {visible(now)})"
+    for slot, ratio in (("medium", 0.5), ("low", 0.25), ("very_low", 0.1)):
+        budget = sum(int(c["high"] * ratio) for c in now.values())
+        total = sum(c[slot] or 0 for c in now.values())
+        assert total <= budget, f"{slot}: the vehicle stays within its triangles ({total} of {budget})"
 
 
 fails = [r for r in results if not r[1]]

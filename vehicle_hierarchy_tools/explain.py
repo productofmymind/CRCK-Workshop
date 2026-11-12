@@ -66,7 +66,7 @@ CATALOG = {
     "HV002_DUPLICATE_NAME": ("Two bones differ only by letter case", "Tags are hashed from the upper-cased name, so they collide.",
                              "Rename one of the bones.", None),
     "HV003_UNKNOWN_BONE": ("Bone name the game does not know", "The engine finds parts by name, so an unknown name does nothing unless a script uses it.",
-                           "Rename it to the part it should be. For a custom part you can ignore this.", "Renames it to the one close match."),
+                           "Rename it to the part it should be. For a custom part you can ignore this. Sides are named from the driver's seat of a left-hand-drive car: dside is the left, pside the right; f and r are front and rear. So the left rear door is door_dside_r and the right rear door door_pside_r.", "Renames it to the name it should have (the bone, and the objects named after it)."),
     "HV004_ROOT_TAG": ("Root bone tag is not 0", "The root bone uses tag 0.", "Turn off the manual tag on the root bone, or set it to 0.",
                        "Makes the tag follow the name."),
     "HV005_DUPLICATE_TAG": ("Two bones share a tag", "The game resolves parts by tag, so one of them is lost.",

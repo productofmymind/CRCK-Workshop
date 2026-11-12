@@ -71,7 +71,7 @@ Blender can't drag list rows, so it is grab and drop, in **Vehicle > Move Parts*
 
 ## 5. Generate LODs
 
-Open **Generate LODs**. The method and detail settings are under **Quality**.
+Open **Automation > Generate LODs**. The method and detail settings are under **Quality**.
 
 1. **Parts:** every part, or only the selected models.
 2. **Start from:** L1 (high) or L0 (`_hi`). The panel shows how many parts have a mesh in each level, and warns when some have no mesh to start from.
@@ -82,6 +82,8 @@ What to know:
 
 - It **never changes the start mesh** or anything above it.
 - A level that already has a mesh is left alone, unless you tick **Replace existing**.
+- What cannot be seen from outside the vehicle (the cabin behind the windows, the engine bay, the inner side of panels) is reduced first, and the lowest level leaves it out, as vanilla vehicles do. **Detail kept inside** (Quality) sets how much it counts; 1 turns this off. A part that is entirely inside has no mesh at the lowest level.
+- The sliders set the triangles of the whole vehicle at each level. With **Share triangles across parts** on (Quality), a part that would lose its shape keeps more of them and a flat or simple part gives some up, so single parts do not land exactly on the slider's share.
 - Material order, UV maps, colour attributes, bone weights and shading are kept.
 - Wheels, glass, lights and mirrors keep extra triangles. Change this with *Protect wheels, glass, lights, mirrors* in the Quality box.
 - **Method:** CRCK Workshop uses its own simplifier: seams never open into cracks, no material disappears and the triangles stay even. Blender Decimate is there as an alternative.

@@ -114,8 +114,8 @@ def describe(v, fix):
         return (f"Bone {fix['bone']}: Use Physics on, so its {len(cols)} bound collision(s) are exported as a physics child "
                 "(it becomes a breakable part with its own group; set the mass afterwards if it shows 0)", "physics", False)
     if op == "make_glass_collision":
-        verts, faces = glass_pane(bpy.data.objects[fix["object"]], fix["bone"])
-        return (f"Bone {fix['bone']}: new collision '{fix['bone']}.col' from the pane of {fix['object']} ({len(faces)} triangles, "
+        _, verts, faces, used = window_pane(v, fix["bone"])
+        return (f"Bone {fix['bone']}: new collision '{fix['bone']}.col' from the pane of {', '.join(used) or fix['object']} ({len(faces)} triangles, "
                 f"{glass_collision_name(fix['bone'])}, mass {GLASS_MASS}), bound to the bone, Use Physics on", "physics", False)
     if op == "add_wheel_collision" and not fix.get("donor"):
         return (f"Bone {fix['bone']}: Use Physics on, and a new disc collision sized from {fix['model']} (axle along X, collision material DEFAULT, "
@@ -153,6 +153,11 @@ def apply(context, v, fixes):
     """Apply fixes; returns report lines. Caller wraps this in an UNDO operator."""
     report = []
     frag = v.frag
+    if frag.data.is_editmode:
+        # While the armature is being edited, Blender ignores a new bone name and drops bone properties written from here when Edit
+        # mode ends: a rename then changed the objects and not the bone. Leave Edit mode first.
+        context.view_layer.objects.active = frag
+        bpy.ops.object.mode_set(mode="OBJECT")
     reparent = [f for f in fixes if f["op"] == "reparent_bone"]
     if reparent:
         before = [b.name for b in frag.data.bones]
@@ -333,6 +338,8 @@ def rename_part(v, bone_name, to):
     arm = v.frag.data
     objs = part_objects(v, bone_name)  # found before the rename, while the vertex groups still carry the old name
     arm.bones[bone_name].name = to  # Blender renames the vertex groups of deformed meshes and the constraints that target the bone
+    if to not in arm.bones:  # refused (the armature is in Edit mode): rename nothing else, or the objects and the bone part ways
+        return [f"Skipped {bone_name} -> {to}: Blender did not rename the bone. Leave Edit mode and try again."]
     done = []
     for o in objs:
         old = o.name
@@ -385,12 +392,35 @@ def glass_pane(model, bone_name=None):
     return out
 
 
-def make_glass_collision(v, bone_name, model_name):
-    model = bpy.data.objects[model_name]
-    verts, faces = glass_pane(model, bone_name)
+def window_pane(v, bone_name):
+    """(world matrix, vertices, triangles, model names): the outer glass of every model bound to a window bone, as one mesh in the
+    space of the first of them. Vanilla window collisions are exactly this pane."""
+    names = set(v.frag.data.bones.keys())
+    world, verts, faces, used = None, [], [], []
+    for m in v.models:
+        if bone_name not in analysis.bone_links(m, names):
+            continue
+        pv, pf = glass_pane(m, bone_name)
+        if not pf:
+            continue
+        if world is None:
+            world, to_first = m.matrix_world.copy(), Matrix.Identity(4)
+        else:
+            to_first = world.inverted() @ m.matrix_world
+        turn = to_first.determinant() < 0  # mirrored against the first model: keep the faces the right way round
+        n = len(verts)
+        verts += [to_first @ x for x in pv]
+        faces += [[n + k for k in (f[::-1] if turn else f)] for f in pf]
+        used.append(m.name)
+    return world, verts, faces, used
+
+
+def make_glass_collision(v, bone_name, model_name=None, max_tris=0):
+    """A CAR_GLASS bound geometry on the pane of the window's models (all the models bound to the bone; `model_name` is only named in
+    the message when there is no glass). `max_tris` above 0 reduces a denser pane to about that many triangles."""
+    world, verts, faces, used = window_pane(v, bone_name)
     if not faces or v.composite is None:
-        return f"{bone_name}: no collision made ({model_name} has no faces or the vehicle has no Bound Composite)."
-    world = model.matrix_world.copy()
+        return f"{bone_name}: no collision made ({model_name or 'no model bound to it'} has no faces or the vehicle has no Bound Composite)."
     if world.determinant() < 0:  # a mirrored model: Sollumz exports a bound's triangles as wound, so a mirrored bound faces inwards
         flip = Matrix.Diagonal((-1.0, 1.0, 1.0, 1.0))
         world = world @ flip
@@ -405,9 +435,77 @@ def make_glass_collision(v, bone_name, model_name):
     obj.child_properties.mass = GLASS_MASS
     obj.parent = v.composite
     obj.matrix_world = world
+    if max_tris and len(faces) > max_tris:
+        mod = obj.modifiers.new("vht_reduce", "DECIMATE")
+        mod.ratio = max_tris / len(faces)
+        reduced = bpy.data.meshes.new_from_object(obj.evaluated_get(bpy.context.evaluated_depsgraph_get()))
+        obj.modifiers.remove(mod)
+        obj.data = reduced
+        bpy.data.meshes.remove(mesh)
+        reduced.name = name
     v.frag.data.bones[bone_name].sollumz_use_physics = True
     bind_objects(v.frag, bone_name, [obj])
-    return f"{bone_name}: collision '{obj.name}' ({len(faces)} triangles, {glass_collision_name(bone_name)}) bound to the bone, Use Physics on"
+    return (f"{bone_name}: collision '{obj.name}' ({len(obj.data.polygons)} triangles, {glass_collision_name(bone_name)}) "
+            "bound to the bone, Use Physics on")
+
+
+WINDOW_OFF = 0.05  # metres: a collision whose vertices are typically further than this from the pane no longer sits on it
+
+
+def _is_glass_collision(obj):
+    return obj.data is not None and any(m is not None and m.name.startswith("CAR_GLASS") for m in obj.data.materials)
+
+
+def window_states(v):
+    """[(bone name, state, [collision names])] for every window bone (the glass bones of the rules), in bone order. state:
+    "ok" a collision sits on the pane, "missing" there is none, "off" there is one but away from the pane (the window was moved after
+    it was made), "no_model" nothing with faces is bound to the bone, so there is no pane to build from."""
+    import numpy as np
+    hand = rules.load()
+    out = []
+    for b in v.frag.data.bones:
+        rule = hand.parent_rule(b.name)
+        if not (rule and rule.get("glass")):
+            continue
+        cols = [c for c in v.bounds if sz.child_of_bone(c) is not None and sz.child_of_bone(c).name == b.name]
+        world, verts, faces, _ = window_pane(v, b.name)
+        if not faces:
+            out.append((b.name, "ok" if cols else "no_model", [c.name for c in cols]))
+            continue
+        if not cols:
+            out.append((b.name, "missing", []))
+            continue
+        pane = np.array([tuple(world @ x) for x in verts])
+        pts = np.array([tuple(c.matrix_world @ x.co) for c in cols if c.data is not None for x in c.data.vertices])
+        if not len(pts):
+            out.append((b.name, "ok", [c.name for c in cols]))
+            continue
+        near = np.sqrt(((pts[:, None, :] - pane[None, :, :]) ** 2).sum(axis=2)).min(axis=1)
+        out.append((b.name, "off" if float(np.median(near)) > WINDOW_OFF else "ok", [c.name for c in cols]))
+    return out
+
+
+def generate_window_collisions(v, replace=False, max_tris=0):
+    """Give every window bone a collision on its pane. Without `replace` only the windows that have none get one; with it, the glass
+    collisions of the others are rebuilt too (removed and made again from the pane as it is now). Returns report lines."""
+    lines = []
+    for bone, state, cols in window_states(v):
+        if state == "no_model":
+            lines.append(f"{bone}: skipped, no model with faces is bound to it")
+            continue
+        if state != "missing":
+            if not replace:
+                if state == "off":
+                    lines.append(f"{bone}: left alone, but '{cols[0]}' is not on the pane (use Replace existing)")
+                continue
+            old = [bpy.data.objects[n] for n in cols if _is_glass_collision(bpy.data.objects[n])]
+            if not old:
+                lines.append(f"{bone}: left alone, its collision is not a glass one")
+                continue
+            for o in old:
+                bpy.data.objects.remove(o, do_unlink=True)
+        lines.append(make_glass_collision(v, bone, max_tris=max_tris))
+    return lines or ["No window bones (windscreen, window_lf ...) in this vehicle."]
 
 
 WHEEL_DENSITY = 940.0  # vanilla wheel discs: mass = 940 * radius^2 * length (merula, savage: within 0.3%)
@@ -574,6 +672,8 @@ def _edit_bones(context, arm_obj, fn):
         for o in prev_sel:
             o.select_set(True)
         view_layer.objects.active = prev_active
+        if prev_mode == "POSE" and prev_active is arm_obj:  # posing the armature: back to it, so the next bone can be picked
+            bpy.ops.object.mode_set(mode="POSE")
 
 
 # --- Outliner view: collections that mirror the bone tree ---------------------

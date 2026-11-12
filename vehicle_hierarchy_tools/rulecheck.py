@@ -75,12 +75,25 @@ def validate_rules(v, profile=None):
             continue
         near = sorted(((edit_distance(base.lower(), k), k) for k in rules.lower if len(k) >= 5))[:2]
         close = [rules.lower[k] for d, k in near if d <= 2]
-        fix = None
-        if len(close) == 1 and close[0] not in name_set and not m:
-            fix = {"op": "rename_bone", "bone": b.name, "to": close[0]}
+        fix, hint = None, ""
+        # What hangs under it says what it is: a bone whose children all belong under one part this vehicle lacks is that part,
+        # misnamed (a rear door holding handle_dside_r and window_lr is door_dside_r, whatever it is called).
+        homes = [set(a for a in r["parents"] if "*" not in a) for r in (rules.parent_rule(c.name) for c in b.children)
+                 if r and r["conf"] in ("H", "M")]
+        meant = set.intersection(*homes) - name_set if homes else set()
+        if len(meant) == 1 and not m:
+            to = meant.pop()
+            kids = [c.name for c in b.children if rules.parent_rule(c.name)]
+            fix = {"op": "rename_part", "bone": b.name, "to": to}
+            hint = (f" Its parts ({', '.join(kids[:3])}) belong under '{to}', which this vehicle does not have: this is that part "
+                    "under another name.")
+        elif len(close) == 1:
+            hint = f" Did you mean '{close[0]}'?"
+            if close[0] not in name_set and not m:
+                fix = {"op": "rename_bone", "bone": b.name, "to": close[0]}
         out.append(Finding(WARNING, "HV003_UNKNOWN_BONE",
                            f"'{b.name}' is not an engine vehicle bone name, so the game will not treat it as a vehicle part "
-                           "(fine for helper/custom bones)." + (f" Did you mean '{close[0]}'?" if len(close) == 1 else ""),
+                           "(fine for helper/custom bones)." + hint,
                            b.name, "bone", fix))
 
     props = getattr(roots[0], "bone_properties", None) if roots else None

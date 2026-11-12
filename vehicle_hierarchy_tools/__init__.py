@@ -10,7 +10,7 @@ bl_info = {
     "author": "George",
     "description": "Vehicle tools for Sollumz: part tree, fixes, LODs, export",
     "blender": (4, 0, 0),
-    "version": (0, 17, 6),
+    "version": (0, 17, 7),
     "category": "Import-Export",
 }
 
@@ -129,6 +129,22 @@ class VHT_State(bpy.types.PropertyGroup):
                                description="Parts that must keep their look keep this many times more triangles. 1 turns it off")
     lod_shading: BoolProperty(name="Keep original shading", default=True,
                               description="Transfer the start mesh's normals onto each level (hard edges stay hard)")
+    win_replace: BoolProperty(name="Replace existing", default=False,
+                              description="Rebuild the glass collisions of windows that already have one, from the pane as it is now. "
+                                          "Off: only windows without a collision get one")
+    win_max_tris: IntProperty(name="Max triangles", default=0, min=0, soft_max=200,
+                              description="Reduce a denser pane to about this many triangles. 0 keeps the pane as it is, which is what "
+                                          "vanilla window collisions are")
+    lod_inside: FloatProperty(name="Detail kept inside", default=0.1, min=0.02, max=1.0, subtype="FACTOR",
+                              description="How much the geometry that cannot be seen from outside the vehicle (interior, engine bay, the inner "
+                                          "side of panels; windows count as solid) matters next to the outer shell. Vanilla LODs keep the shell "
+                                          "and strip the inside: at 0.1 the inside gives way ten times sooner, and the lowest level leaves it out. "
+                                          "1 treats everything alike and removes nothing")
+    lod_share: BoolProperty(name="Share triangles across parts", default=True,
+                            description="Each level keeps the same number of triangles for the whole vehicle, but parts that lose their shape "
+                                        "quickly keep more of them and parts that stay close to the original give some up (measured as the "
+                                        "distance between the reduced mesh and the start mesh). Off: every part keeps the same share of its own "
+                                        "triangles")
     lod_overwrite: BoolProperty(name="Replace existing", default=False, description="Rebuild slots that already have a mesh. Off: they are left alone")
     usage: CollectionProperty(type=VHT_UsageRow)
     usage_index: IntProperty()

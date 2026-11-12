@@ -54,10 +54,28 @@ def tree_objects(v, bone_name, subtree=True):
     return [o for o in v.models + v.bounds if keep & set(analysis.bone_links(o, names))]
 
 
+def _select_only_bone(frag, name):
+    """Make one bone the active and only selected bone. Blender 5.x keeps the selection on PoseBone, 4.x on Bone."""
+    frag.data.bones.active = frag.data.bones[name]
+    for pb in frag.pose.bones:
+        if hasattr(pb, "select"):
+            pb.select = pb.name == name
+        else:
+            pb.bone.select = pb.name == name
+
+
+_quiet = False  # True while a tool moves the active row to match the viewport: the row follows the selection, it must not change it
+
+
 def select_node(context, frag_name, row):
-    """Click on a hierarchy row: select the part (and everything under it) or one collision."""
+    """Click on a hierarchy row: select the part (and everything under it) or one collision. While posing the armature, a click on a
+    part selects its bone and stays in Pose mode, so bones can be picked from the list and the viewport alike."""
     frag = bpy.data.objects.get(frag_name)
-    if frag is None:
+    if frag is None or _quiet:
+        return
+    if context.mode == "POSE" and context.active_object is frag and row.kind == "node" and row.bone in frag.data.bones:
+        _select_only_bone(frag, row.bone)
+        state(context).seen_bone = bone_token(frag)
         return
     if context.mode != "OBJECT":
         bpy.ops.object.mode_set(mode="OBJECT")
@@ -72,15 +90,14 @@ def select_node(context, frag_name, row):
         bone = frag.data.bones.get(row.bone)
         picks = tree_objects(v, row.bone, subtree=False)  # this part's own objects only, not those of the parts under it
         if bone is not None:
-            frag.data.bones.active = bone
-            for pb in frag.pose.bones:  # only this bone is selected
-                pb.select = pb.name == row.bone
+            _select_only_bone(frag, row.bone)
             if not picks:  # a part with no geometry: select the bone itself (Pose mode shows just that one)
                 for o in context.view_layer.objects:
                     o.select_set(False)
                 context.view_layer.objects.active = frag
                 frag.select_set(True)
                 bpy.ops.object.mode_set(mode="POSE")
+                state(context).seen_bone = bone_token(frag)
                 return
     picks = [p for p in picks if p is not None]
     for p in picks:
@@ -470,6 +487,7 @@ def selected_part(v):
 def follow(st, v):
     """Make the part picked in the viewport or Outliner the active row, if the selection changed there since the last click on a row.
     Returns True when it did: the row then stands for that selection, not for an earlier click in the list."""
+    global _quiet
     token = bone_token(v.frag)
     if token == st.seen_bone:
         return False
@@ -478,8 +496,11 @@ def follow(st, v):
     if picked in v.frag.data.bones:
         for i, r in enumerate(st.tree):
             if r.kind == "node" and r.bone == picked:
-                st.tree_index = i  # fires select_node, which resets the token: set it again after
-                st.seen_bone = bone_token(v.frag)
+                _quiet = True  # only the row moves: the selection and the mode (Pose, Object) stay as the user has them
+                try:
+                    st.tree_index = i
+                finally:
+                    _quiet = False
                 return True
     return False
 
@@ -714,6 +735,10 @@ class VHT_OT_tree_drop(bpy.types.Operator):
         if name not in arm.bones:
             st.tree_grab = ""
             self.report({"ERROR"}, f"'{name}' no longer exists.")
+            return {"CANCELLED"}
+        if self.mode != "UNLINK" and target.kind == "node" and target.bone == name:
+            self.report({"ERROR"}, f"'{name}' is the part you are holding. Select the part to drop it on (a bone in Pose mode, an "
+                                   "object of that part, or its row in Hierarchy), then press the button again.")
             return {"CANCELLED"}
         if self.mode == "UNLINK":
             new_parent = None
@@ -1192,10 +1217,15 @@ class VHT_OT_lods_generate(bpy.types.Operator):
             return {"CANCELLED"}
         ratios = {"high": st.lod_high, "medium": st.lod_medium, "low": st.lod_low, "very_low": st.lod_very_low}
         rep = lodgen.generate(models, st.lod_start, ratios, st.lod_make_hi, st.lod_overwrite, st.lod_method, st.lod_chain,
-                              st.lod_protect, st.lod_shading, set(v.frag.data.bones.keys()) if v.frag is not None else set())
+                              st.lod_protect, st.lod_shading, set(v.frag.data.bones.keys()) if v.frag is not None else set(), st.lod_share, st.lod_inside, v.models)
         lines = []
         tri = rep["triangles"]
         lines.append("Triangles: " + ", ".join(f"L{i} {tri[s]}" for i, (s, _) in enumerate(lodgen.LEVELS) if tri[s]))
+        if rep.get("shared"):
+            lines.append("Triangles shared across the parts by surface error.")
+        if rep.get("inside"):
+            hidden = rep["methods"].get("hidden", 0)
+            lines.append("The inside of the vehicle gave way first" + (f"; {hidden} part(s) that cannot be seen from outside have no mesh at the lowest level." if hidden else "."))
         if rep["methods"]:
             lines.append("Meshes made by: " + ", ".join(f"{k} {n}" for k, n in sorted(rep["methods"].items())))
         for name, why in rep["skipped"][:6]:
@@ -1206,6 +1236,34 @@ class VHT_OT_lods_generate(bpy.types.Operator):
         n = sum(len(sl) for _, sl, _ in rep["done"])
         self.report({"INFO"}, f"{n} LOD mesh(es) on {len(rep['done'])} of {len(models)} models"
                     + ("" if rep["done"] else " (nothing to do: every slot has a mesh, or the start mesh is missing)"))
+        return {"FINISHED"}
+
+
+class VHT_OT_window_collisions(bpy.types.Operator):
+    bl_idname = "vht.window_collisions"
+    bl_label = "Generate Window Collisions"
+    bl_description = ("Give every window bone (windscreen, window_lf ...) the collision it needs to shatter: a CAR_GLASS bound on the outer "
+                      "glass of its models, bound to the bone, with Use Physics on. Windows that have one are left alone unless Replace "
+                      "existing is on. Ctrl+Z undoes it")
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        if context.mode != "OBJECT":
+            self.report({"ERROR"}, "Go to Object mode first.")
+            return {"CANCELLED"}
+        v = get_vehicle(self, context)
+        if v is None:
+            return {"CANCELLED"}
+        if v.composite is None:
+            self.report({"ERROR"}, "The vehicle has no Bound Composite to put collisions in.")
+            return {"CANCELLED"}
+        st = state(context)
+        lines = fixes.generate_window_collisions(v, st.win_replace, st.win_max_tris)
+        st.report = chr(10).join(lines)
+        if st.tree:
+            fill_tree(st, analysis.load(v.frag))
+        made = sum(1 for l in lines if "bound to the bone" in l)
+        self.report({"INFO"}, f"{made} window collision(s) made" if made else "Nothing made: " + lines[0])
         return {"FINISHED"}
 
 
@@ -1426,5 +1484,5 @@ classes = (VHT_OT_inspect, VHT_OT_validate, VHT_OT_suggest, VHT_OT_apply, VHT_OT
            VHT_OT_fix_finding, VHT_OT_rename_part, VHT_OT_arrange, VHT_OT_couple_objects, VHT_OT_couple_bones, VHT_OT_build_parts, VHT_OT_remove_parts, VHT_OT_estimate_size, VHT_OT_export_compact, VHT_OT_move_bone,
            VHT_OT_tree_toggle, VHT_OT_tree_expand, VHT_OT_tree_visible, VHT_OT_tree_show, VHT_OT_tree_lod, VHT_OT_tree_col,
            VHT_OT_tree_move, VHT_OT_tree_grab, VHT_OT_tree_drop, VHT_OT_tree_axes, VHT_OT_tree_attach, VHT_OT_tree_adopt,
-           VHT_OT_paint_refresh, VHT_OT_paint_assign, VHT_OT_paint_add, VHT_OT_shader_add, VHT_OT_paint_livery, VHT_OT_paint_livery_texture, VHT_OT_fill_textures, VHT_OT_lods_generate, VHT_OT_mat_transfer, VHT_OT_usage_refresh, VHT_OT_usage_select, VHT_OT_usage_replace,
+           VHT_OT_paint_refresh, VHT_OT_paint_assign, VHT_OT_paint_add, VHT_OT_shader_add, VHT_OT_paint_livery, VHT_OT_paint_livery_texture, VHT_OT_fill_textures, VHT_OT_lods_generate, VHT_OT_window_collisions, VHT_OT_mat_transfer, VHT_OT_usage_refresh, VHT_OT_usage_select, VHT_OT_usage_replace,
            VHT_OT_mat_load, VHT_OT_mat_autosort, VHT_OT_mat_move, VHT_OT_mat_preview)

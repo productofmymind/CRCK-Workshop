@@ -1,5 +1,5 @@
 """The sidebar: one tab, CRCK Workshop. Top: Check (status, Check Vehicle, the preview of any change), then Issues; below, a few groups (Vehicle,
-Generate LODs, Materials, Export Info) whose tools are short sub-panels, closed until needed. Explanations are tooltips, or shown in the
+Automation, Materials, Export Info) whose tools are short sub-panels, closed until needed. Explanations are tooltips, or shown in the
 panels with the Hints switch in the main panel."""
 import textwrap
 
@@ -389,10 +389,49 @@ class VHT_PT_tree_move(Sub):
         col.operator("vht.tree_adopt", text="Put Selected Bones Under This Part", icon="LINKED")
 
 
+class VHT_PT_automation(Sub):
+    bl_label = "Automation"
+    icon = "MODIFIER"
+
+    @classmethod
+    def poll(cls, context):
+        return has_model(context)
+
+    def draw(self, context):
+        hint(self.layout, "Tools that build things for the whole vehicle in one go: the LOD meshes and the window collisions.")
+
+
+class VHT_PT_windows(Sub):
+    bl_label = "Window Collisions"
+    bl_parent_id = "VHT_PT_automation"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        from . import analysis, fixes
+        layout = self.layout
+        st = context.window_manager.vht
+        hint(layout, "A window shatters only if its bone has Use Physics on and a glass collision. This makes one for every window bone "
+                     "from the outer glass of its models, as vanilla vehicles have it: weak glass for side windows, strong for windscreens.")
+        states = fixes.window_states(analysis.load(sz.find_fragment(context.active_object)))
+        n = {s: sum(1 for _, x, _ in states if x == s) for s in ("ok", "missing", "off", "no_model")}
+        layout.label(text=f"{len(states)} windows:  {n['ok']} done  {n['missing']} missing" + (f"  {n['off']} off the glass" if n["off"] else ""))
+        for bone, state, _ in states:
+            if state == "off":
+                layout.label(text=f"{bone}: collision is not on the glass", icon="ERROR")
+            elif state == "no_model":
+                layout.label(text=f"{bone}: no model to build from", icon="INFO")
+        col = layout.column(align=True)
+        col.prop(st, "win_replace")
+        col.prop(st, "win_max_tris")
+        row = layout.row()
+        row.scale_y = 1.3
+        row.operator("vht.window_collisions", icon="MOD_PHYSICS")
+
+
 class VHT_PT_lods(Sub):
     bl_label = "Generate LODs"
+    bl_parent_id = "VHT_PT_automation"
     bl_options = {"DEFAULT_CLOSED"}
-    icon = "MOD_DECIM"
 
     @classmethod
     def poll(cls, context):
@@ -446,6 +485,8 @@ class VHT_PT_lod_quality(Sub):
         col.prop(st, "lod_method")
         col.prop(st, "lod_protect", slider=True)
         col.prop(st, "lod_shading")
+        col.prop(st, "lod_share")
+        col.prop(st, "lod_inside", slider=True)
         col.prop(st, "lod_chain")
 
 
@@ -704,6 +745,6 @@ class VHT_PT_order(Sub):
 
 
 classes = (VHT_UL_findings, VHT_UL_materials, VHT_UL_paint, VHT_UL_usage, VHT_UL_hierarchy,
-           VHT_PT_main, VHT_PT_problems, VHT_PT_vehicle_group, VHT_PT_hierarchy, VHT_PT_tree_move, VHT_PT_axes, VHT_PT_lods, VHT_PT_lod_quality,
+           VHT_PT_main, VHT_PT_problems, VHT_PT_vehicle_group, VHT_PT_hierarchy, VHT_PT_tree_move, VHT_PT_axes, VHT_PT_automation, VHT_PT_lods, VHT_PT_lod_quality, VHT_PT_windows,
            VHT_PT_materials_group, VHT_PT_mat_paint, VHT_PT_mat_shader, VHT_PT_mat_add, VHT_PT_mat_livery, VHT_PT_mat_textures, VHT_PT_mat_usage, VHT_PT_mat_transfer, VHT_PT_materials,
            VHT_PT_order)

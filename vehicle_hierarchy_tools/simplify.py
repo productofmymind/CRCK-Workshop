@@ -70,9 +70,10 @@ def _tri_check(pa, pb, pc, f):
 class Simplifier:
     """pos: (P, 3) welded positions. tris: (T, 3) position ids. wedges: (T, 3) wedge ids per corner. mats: (T,) material per triangle.
     locked: (P,) bool, vertices that must stay. attrs: (W, k) wedge attributes; scale: (k,) metres per unit of each column (both None: seams are
-    hard and vertices never move)."""
+    hard and vertices never move). weights: (T,) how much each triangle's shape matters (1 everywhere when None): errors on a triangle of
+    weight 0.1 cost a tenth, so those parts of the mesh give way first."""
 
-    def __init__(self, pos, tris, wedges, mats, locked=None, attrs=None, scale=None):
+    def __init__(self, pos, tris, wedges, mats, locked=None, attrs=None, scale=None, weights=None):
         pos = np.asarray(pos, np.float64)
         tris = np.asarray(tris, np.int64).reshape(-1, 3)
         wedges = np.asarray(wedges, np.int64).reshape(-1, 3)
@@ -80,6 +81,7 @@ class Simplifier:
         keep = (tris[:, 0] != tris[:, 1]) & (tris[:, 1] != tris[:, 2]) & (tris[:, 2] != tris[:, 0])
         tris, wedges, mats = tris[keep], wedges[keep], mats[keep]
         P, T = len(pos), len(tris)
+        tw = np.ones(T) if weights is None else np.asarray(weights, np.float64)[keep]
         lock = np.zeros(P, bool) if locked is None else np.asarray(locked, bool).copy()
 
         a, b, c = pos[tris[:, 0]], pos[tris[:, 1]], pos[tris[:, 2]]
@@ -87,7 +89,7 @@ class Simplifier:
         dbl = np.linalg.norm(cr, axis=1)
         n = cr / np.maximum(dbl, 1e-30)[:, None]
         Q = np.zeros((P, 11))
-        fq = _quadrics(n, -(n * a).sum(1), dbl * 0.5)
+        fq = _quadrics(n, -(n * a).sum(1), dbl * 0.5 * tw)
         for k in range(3):
             np.add.at(Q, tris[:, k], fq)
 
@@ -126,7 +128,7 @@ class Simplifier:
                 ml = np.linalg.norm(m, axis=1)
                 ok = ml > 1e-30
                 m = m[ok] / ml[ok][:, None]
-                q = _quadrics(m, -(m * pl[ok]).sum(1), weight * (ed[ok] ** 2).sum(1))
+                q = _quadrics(m, -(m * pl[ok]).sum(1), weight * (ed[ok] ** 2).sum(1) * tw[t][ok])
                 np.add.at(Q, lo[start[sel]][ok], q)
                 np.add.at(Q, hi[start[sel]][ok], q)
         deg = np.bincount(np.r_[fl, fh], minlength=P)
@@ -137,6 +139,7 @@ class Simplifier:
         self.T = tris.tolist()
         self.W = wedges.tolist()
         self.M = mats.tolist()
+        self.Wt = tw.tolist()
         self.mcount = {}
         for m in self.M:
             self.mcount[m] = self.mcount.get(m, 0) + 1
@@ -292,7 +295,7 @@ class Simplifier:
                 return None
             minq = min(minq, r[1])
             if wu in jump:
-                attr_cost += 0.5 * r[0] * jump[wu]
+                attr_cost += 0.5 * r[0] * jump[wu] * self.Wt[t]
         if move is not None:  # v moves too: its own triangles must stay valid
             for t in self.vt[v]:
                 if t in shared:
@@ -428,13 +431,13 @@ class Simplifier:
         self.feat = {(a, b) for a, b in self.feat if sum(1 for t in self.vt[a] if b in T[t]) == 1}
 
     def snapshot(self):
-        """(wedge triangles, position-id triangles, materials, positions now) of the current mesh."""
+        """(wedge triangles, position-id triangles, materials, positions now, triangle weights) of the current mesh."""
         idx = [t for t in range(len(self.T)) if self.alive[t]]
         if not idx:
             z = np.zeros((0, 3), np.int64)
-            return z, z, np.zeros(0, np.int64), np.zeros((0, 3))
+            return z, z, np.zeros(0, np.int64), np.zeros((0, 3)), np.zeros(0)
         return (np.array([self.W[t] for t in idx], np.int64), np.array([self.T[t] for t in idx], np.int64),
-                np.array([self.M[t] for t in idx], np.int64), np.array(self.P, np.float64))
+                np.array([self.M[t] for t in idx], np.int64), np.array(self.P, np.float64), np.array([self.Wt[t] for t in idx]))
 
     def attributes(self):
         """(W', k) attribute rows of every wedge, the blended ones included."""
