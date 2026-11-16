@@ -415,7 +415,37 @@ def window_pane(v, bone_name):
     return world, verts, faces, used
 
 
-def make_glass_collision(v, bone_name, model_name=None, max_tris=0):
+def object_bones(v, objs):
+    """Bones (in order, once each) that the models and collisions in `objs` are bound to."""
+    names = set(v.frag.data.bones.keys())
+    out = []
+    for o in objs:
+        if o in v.models or o in v.bounds:
+            out += [b for b in analysis.bone_links(o, names) if b not in out]
+    return out
+
+
+def bone_collisions(v, bone_name):
+    return [c for c in v.bounds if sz.child_of_bone(c) is not None and sz.child_of_bone(c).name == bone_name]
+
+
+def glass_for_bone(v, bone_name, replace=False, max_tris=0, strong=False):
+    """A glass collision on any bone (a window that is not a window bone, e.g. a misc part). An existing glass collision on the bone is
+    rebuilt only with `replace`; other collisions on it are never removed. Returns a report line."""
+    old = bone_collisions(v, bone_name)
+    if old and not replace:
+        return f"{bone_name}: left alone, it has collision '{old[0].name}' (Replace existing rebuilds a glass one)"
+    glass = [o for o in old if _is_glass_collision(o)]
+    if old and not glass:
+        return f"{bone_name}: left alone, its collision '{old[0].name}' is not a glass one"
+    line = make_glass_collision(v, bone_name, max_tris=max_tris, strong=strong or None)
+    if "bound to the bone" in line:
+        for o in glass:
+            bpy.data.objects.remove(o, do_unlink=True)
+    return line
+
+
+def make_glass_collision(v, bone_name, model_name=None, max_tris=0, strong=None):
     """A CAR_GLASS bound geometry on the pane of the window's models (all the models bound to the bone; `model_name` is only named in
     the message when there is no glass). `max_tris` above 0 reduces a denser pane to about that many triangles."""
     world, verts, faces, used = window_pane(v, bone_name)
@@ -430,7 +460,8 @@ def make_glass_collision(v, bone_name, model_name=None, max_tris=0):
     mesh = bpy.data.meshes.new(name)
     mesh.from_pydata(verts, [], faces)
     mesh.validate()
-    mesh.materials.append(sz.collision_material(glass_collision_name(bone_name)))
+    kind = "CAR_GLASS_STRONG" if strong else glass_collision_name(bone_name)
+    mesh.materials.append(sz.collision_material(kind))
     obj = sz.new_bound_geometry(name, mesh, v.composite.users_collection[0])
     obj.child_properties.mass = GLASS_MASS
     obj.parent = v.composite
@@ -445,7 +476,7 @@ def make_glass_collision(v, bone_name, model_name=None, max_tris=0):
         reduced.name = name
     v.frag.data.bones[bone_name].sollumz_use_physics = True
     bind_objects(v.frag, bone_name, [obj])
-    return (f"{bone_name}: collision '{obj.name}' ({len(obj.data.polygons)} triangles, {glass_collision_name(bone_name)}) "
+    return (f"{bone_name}: collision '{obj.name}' ({len(obj.data.polygons)} triangles, {kind}) "
             "bound to the bone, Use Physics on")
 
 

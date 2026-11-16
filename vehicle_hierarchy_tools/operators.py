@@ -1267,6 +1267,66 @@ class VHT_OT_window_collisions(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class VHT_OT_window_collision_selected(bpy.types.Operator):
+    bl_idname = "vht.window_collision_selected"
+    bl_label = "Glass Collision for Selected"
+    bl_description = ("Make a glass collision for the selected objects' bones from their outer glass: for windows that are not window "
+                      "bones (misc parts, a pen's glass ...). Warns when the bone already has a collision. Ctrl+Z undoes it")
+    bl_options = {"REGISTER", "UNDO"}
+
+    replace: bpy.props.BoolProperty(name="Replace existing glass collision", default=False)
+    strong: bpy.props.BoolProperty(name="Strong glass", description="CAR_GLASS_STRONG instead of CAR_GLASS_WEAK", default=False)
+
+    def _targets(self, context):
+        v = get_vehicle(self, context)
+        if v is None:
+            return None, []
+        return v, fixes.object_bones(v, context.selected_objects)
+
+    def invoke(self, context, event):
+        v, bones = self._targets(context)
+        if v is None:
+            return {"CANCELLED"}
+        if not bones:
+            self.report({"ERROR"}, "Select a model (or collision) bound to a bone first.")
+            return {"CANCELLED"}
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        v, bones = self._targets(context)
+        col = self.layout.column()
+        for b in bones or ():
+            old = fixes.bone_collisions(v, b)
+            if old:
+                col.label(text=f"{b} already has collision: {', '.join(c.name for c in old)}", icon="ERROR")
+            else:
+                col.label(text=f"{b}: no collision yet", icon="CHECKMARK")
+        col.prop(self, "strong")
+        col.prop(self, "replace")
+
+    def execute(self, context):
+        if context.mode != "OBJECT":
+            self.report({"ERROR"}, "Go to Object mode first.")
+            return {"CANCELLED"}
+        v, bones = self._targets(context)
+        if v is None:
+            return {"CANCELLED"}
+        if v.composite is None:
+            self.report({"ERROR"}, "The vehicle has no Bound Composite to put collisions in.")
+            return {"CANCELLED"}
+        if not bones:
+            self.report({"ERROR"}, "Select a model (or collision) bound to a bone first.")
+            return {"CANCELLED"}
+        st = state(context)
+        lines = [fixes.glass_for_bone(v, b, self.replace, st.win_max_tris, self.strong) for b in bones]
+        st.report = chr(10).join(lines)
+        if st.tree:
+            fill_tree(st, analysis.load(v.frag))
+        made = sum(1 for l in lines if "bound to the bone" in l)
+        self.report({"INFO"} if made else {"WARNING"}, f"{made} collision(s) made" if made else lines[0])
+        return {"FINISHED"}
+
+
 class VHT_OT_fill_textures(bpy.types.Operator):
     bl_idname = "vht.fill_textures"
     bl_label = "Fill Empty Textures"
@@ -1484,5 +1544,5 @@ classes = (VHT_OT_inspect, VHT_OT_validate, VHT_OT_suggest, VHT_OT_apply, VHT_OT
            VHT_OT_fix_finding, VHT_OT_rename_part, VHT_OT_arrange, VHT_OT_couple_objects, VHT_OT_couple_bones, VHT_OT_build_parts, VHT_OT_remove_parts, VHT_OT_estimate_size, VHT_OT_export_compact, VHT_OT_move_bone,
            VHT_OT_tree_toggle, VHT_OT_tree_expand, VHT_OT_tree_visible, VHT_OT_tree_show, VHT_OT_tree_lod, VHT_OT_tree_col,
            VHT_OT_tree_move, VHT_OT_tree_grab, VHT_OT_tree_drop, VHT_OT_tree_axes, VHT_OT_tree_attach, VHT_OT_tree_adopt,
-           VHT_OT_paint_refresh, VHT_OT_paint_assign, VHT_OT_paint_add, VHT_OT_shader_add, VHT_OT_paint_livery, VHT_OT_paint_livery_texture, VHT_OT_fill_textures, VHT_OT_lods_generate, VHT_OT_window_collisions, VHT_OT_mat_transfer, VHT_OT_usage_refresh, VHT_OT_usage_select, VHT_OT_usage_replace,
+           VHT_OT_paint_refresh, VHT_OT_paint_assign, VHT_OT_paint_add, VHT_OT_shader_add, VHT_OT_paint_livery, VHT_OT_paint_livery_texture, VHT_OT_fill_textures, VHT_OT_lods_generate, VHT_OT_window_collisions, VHT_OT_window_collision_selected, VHT_OT_mat_transfer, VHT_OT_usage_refresh, VHT_OT_usage_select, VHT_OT_usage_replace,
            VHT_OT_mat_load, VHT_OT_mat_autosort, VHT_OT_mat_move, VHT_OT_mat_preview)

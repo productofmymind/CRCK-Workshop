@@ -512,6 +512,27 @@ def t_rear_rotor_aligns_local_x_and_origin_moves_to_spin_centre():
 
 
 @test
+def t_glass_for_any_selected_bone_warns_before_replacing():
+    from vehicle_hierarchy_tools import fixes, sollumz_bridge as sz
+    frag = build_vehicle()
+    v = analysis.load(frag)
+    model = bpy.data.objects["window_m"]
+    assert fixes.object_bones(v, [model]) == ["window_lf"]
+    assert fixes.bone_collisions(v, "window_lf"), "the synthetic window has a collision"
+    assert "left alone" in fixes.glass_for_bone(v, "window_lf")
+    assert "not a glass one" in fixes.glass_for_bone(v, "window_lf", replace=True), "a non-glass collision is never removed"
+    for c in fixes.bone_collisions(v, "window_lf"):
+        bpy.data.objects.remove(c, do_unlink=True)
+    v = analysis.load(frag)
+    assert "bound to the bone" in fixes.glass_for_bone(v, "window_lf", strong=True)
+    v = analysis.load(frag)
+    assert "left alone" in fixes.glass_for_bone(v, "window_lf")
+    assert "bound to the bone" in fixes.glass_for_bone(v, "window_lf", replace=True, strong=True)
+    cols = fixes.bone_collisions(analysis.load(frag), "window_lf")
+    assert len(cols) == 1 and any(m.name.startswith("CAR_GLASS_STRONG") for m in cols[0].data.materials)
+
+
+@test
 def t_glass_collision_faces_outwards_on_a_mirrored_model_and_takes_only_its_bone():
     from mathutils import Vector
     from vehicle_hierarchy_tools import fixes, sollumz_bridge as sz

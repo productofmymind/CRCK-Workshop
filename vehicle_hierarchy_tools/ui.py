@@ -426,6 +426,16 @@ class VHT_PT_windows(Sub):
         row = layout.row()
         row.scale_y = 1.3
         row.operator("vht.window_collisions", icon="MOD_PHYSICS")
+        layout.separator()
+        hint(layout, "Another part is glass (misc, a pen)? Select its model, then make its collision here. You are warned if the bone already has one.")
+        vv = analysis.load(sz.find_fragment(context.active_object))
+        sel = fixes.object_bones(vv, context.selected_objects)
+        for b in sel:
+            cols = fixes.bone_collisions(vv, b)
+            layout.label(text=f"{b}: " + (f"has collision {cols[0].name}" if cols else "no collision"), icon="ERROR" if cols else "CHECKMARK")
+        row = layout.row()
+        row.enabled = bool(sel)
+        row.operator("vht.window_collision_selected", icon="MOD_PHYSICS")
 
 
 class VHT_PT_lods(Sub):
